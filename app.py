@@ -165,6 +165,17 @@ def extract_stream(imdb_id, media_type='movie', season=1, episode=1):
 @app.route('/')
 def index():
     return render_template('index.html')
+@app.route('/api/test_providers')
+def test_providers():
+    imdb_id = 'tt1339713' # test movie
+    results = {}
+    for provider in PROVIDERS:
+        try:
+            srvs = fetch_provider_servers(provider, imdb_id, 'movie', 1, 1)
+            results[provider] = len(srvs)
+        except Exception as e:
+            results[provider] = str(e)
+    return jsonify(results)
 
 @app.route('/api/play/<media_type>/<int:tmdb_id>')
 def play_media(media_type, tmdb_id):
