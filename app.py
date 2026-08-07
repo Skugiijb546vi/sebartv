@@ -103,71 +103,65 @@ def fetch_provider_servers(provider, imdb_id, media_type, season, episode):
     return []
 
 def extract_stream(imdb_id, media_type='movie', season=1, episode=1):
-    import os
-    if os.environ.get('RENDER'):
-        fallback_url = f'https://vidsrc.me/embed/movie/{imdb_id}' if media_type == 'movie' else f'https://vidsrc.me/embed/tv/{imdb_id}/{season}/{episode}'
-        return fallback_url, 'iframe', [], [], ["Skipped backend scraping on Render due to Cloudflare blocks"]
-        
     all_servers = []
     
-    # Always include the primary provider, plus 2 random ones to ensure reliability
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [executor.submit(fetch_provider_servers, p, imdb_id, media_type, season, episode) for p in FAST_PROVIDERS]
-        for future in concurrent.futures.as_completed(futures):
-            servers = future.result()
+    # We select 10 providers to check in parallel
+    selected_providers = PROVIDERS[:3]
+    if len(PROVIDERS) > 3:
+        import random
+        selected_providers.extend(random.sample(PROVIDERS[3:], min(7, len(PROVIDERS)-3)))
         
     debug_log = []
-    for provider in PROVIDERS:
-        try:
-            srvs = fetch_provider_servers(provider, imdb_id, media_type, season, episode)
-            all_servers.extend(srvs)
-            debug_log.append(f"{provider}: found {len(srvs)} servers")
-        except Exception as e:
-            debug_log.append(f"{provider}: error {str(e)}")
-            continue
+    unique_servers = []
+    
+    # Run provider checks in parallel to bypass timeouts instantly!
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_provider = {
+            executor.submit(fetch_provider_servers, provider, imdb_id, media_type, season, episode): provider
+            for provider in selected_providers
+        }
+        
+        for future in concurrent.futures.as_completed(future_to_provider):
+            provider = future_to_provider[future]
+            try:
+                srvs = future.result()
+                if srvs:
+                    all_servers.extend(srvs)
+                    debug_log.append(f"{provider}: found {len(srvs)} servers")
+            except Exception as e:
+                debug_log.append(f"{provider}: {str(e)}")
 
     seen_names = set()
-    unique_servers = []
     for s in all_servers:
         name = s.get('name')
         if name and name not in seen_names:
             seen_names.add(name)
             unique_servers.append(s)
-            
-    if not unique_servers:
+
+    if not all_servers:
         return None, None, [], [], debug_log
         
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'cross-site'
-    })
+    import random
+    random.shuffle(all_servers)
     
-    for server in unique_servers:
+    import requests
+    for server in all_servers:
         try:
             ref = server['ref']
             provider = server.get('provider', PROVIDERS[0])
             play_url = f'{provider}/api.php?a=play&ref={ref}'
-            play_resp = session.get(play_url, headers={'Referer': f'{provider}/'}, timeout=10).json()
-
-            if play_resp.get('url'):
-                url = play_resp['url']
-                subs = play_resp.get('subtitles') or play_resp.get('tracks') or play_resp.get('subs') or play_resp.get('captions') or []
+            play_resp = requests.get(play_url, headers={'Referer': f'{provider}/'}, timeout=5).json()
+            if 'source' in play_resp:
+                url = play_resp['source']
+                subs = play_resp.get('subtitles', [])
+                debug_log.append(f"Successfully extracted stream from {provider}")
                 return url, play_resp.get('type', 'hls'), subs, unique_servers, debug_log
         except Exception as e:
             debug_log.append(f"play_server {provider} error: {str(e)}")
             continue
             
-    # Fallback to direct iframe if all servers fail (usually due to Cloudflare blocking Render IPs)
-    fallback_url = f'https://vidsrc.me/embed/movie/{imdb_id}' if media_type == 'movie' else f'https://vidsrc.me/embed/tv/{imdb_id}/{season}/{episode}'
-    return fallback_url, 'iframe', [], unique_servers, debug_log
+    return None, None, [], unique_servers, debug_log
 
 @app.route('/')
 def index():

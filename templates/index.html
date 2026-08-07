@@ -789,31 +789,6 @@ async function playMedia(tmdbId, mediaType, season = 1, episode = 1) {
 
 function attemptPlay(url, type, provider = '', subtitles = []) {
     let finalUrl = url;
-    if (type === 'iframe') {
-        // Find Kurdish subtitle if exists
-        let kurdishSub = subtitles.find(s => s.label.includes('Kurdish'));
-        if (kurdishSub) {
-            let encodedSubUrl = encodeURIComponent('https://' + window.location.host + kurdishSub.file);
-            if (finalUrl.includes('?')) {
-                finalUrl += `&sub.info=${encodedSubUrl}`;
-            } else {
-                finalUrl += `?sub.info=${encodedSubUrl}`;
-            }
-        }
-        
-        stopPlayer();
-        isFetchingNextServer = false;
-        let videoContainer = document.getElementById('videoContainer');
-        videoContainer.innerHTML = `<iframe src="${finalUrl}" class="w-full h-full border-0" allowfullscreen allow="autoplay; fullscreen"></iframe>`;
-        
-        let status = document.getElementById('playerStatus');
-        if (status) {
-            status.textContent = 'ژێرنووسە کوردییەکە ئامادەیە (لێدان بکە)!';
-            setTimeout(() => status.textContent = '', 5000);
-        }
-        return;
-    }
-    
     if (type !== 'mp4') {
         finalUrl = '/proxy?url=' + encodeURIComponent(url);
         if (provider) {
