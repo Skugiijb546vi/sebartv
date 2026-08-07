@@ -106,17 +106,23 @@ def extract_stream(imdb_id, media_type='movie', season=1, episode=1):
     all_servers = []
     
     # Always include the primary provider, plus 2 random ones to ensure reliability
-    selected_providers = [FAST_PROVIDERS[0]] + random.sample(FAST_PROVIDERS[1:], 2)
-    
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [executor.submit(fetch_provider_servers, p, imdb_id, media_type, season, episode) for p in selected_providers]
+        futures = [executor.submit(fetch_provider_servers, p, imdb_id, media_type, season, episode) for p in FAST_PROVIDERS]
         for future in concurrent.futures.as_completed(futures):
             servers = future.result()
-            if servers:
-                all_servers.extend(servers)
-            
-    unique_servers = []
+        
+    debug_log = []
+    for provider in PROVIDERS:
+        try:
+            srvs = fetch_provider_servers(provider, imdb_id, media_type, season, episode)
+            all_servers.extend(srvs)
+            debug_log.append(f"{provider}: found {len(srvs)} servers")
+        except Exception as e:
+            debug_log.append(f"{provider}: error {str(e)}")
+            continue
+
     seen_names = set()
+    unique_servers = []
     for s in all_servers:
         name = s.get('name')
         if name and name not in seen_names:
@@ -124,7 +130,7 @@ def extract_stream(imdb_id, media_type='movie', season=1, episode=1):
             unique_servers.append(s)
             
     if not unique_servers:
-        return None, None, [], []
+        return None, None, [], [], debug_log
         
     session = requests.Session()
     session.headers.update({
@@ -149,11 +155,12 @@ def extract_stream(imdb_id, media_type='movie', season=1, episode=1):
             if play_resp.get('url'):
                 url = play_resp['url']
                 subs = play_resp.get('subtitles') or play_resp.get('tracks') or play_resp.get('subs') or play_resp.get('captions') or []
-                return url, play_resp.get('type', 'hls'), subs, unique_servers
-        except:
+                return url, play_resp.get('type', 'hls'), subs, unique_servers, debug_log
+        except Exception as e:
+            debug_log.append(f"play_server {provider} error: {str(e)}")
             continue
             
-    return None, None, [], unique_servers
+    return None, None, [], unique_servers, debug_log
 
 @app.route('/')
 def index():
@@ -169,7 +176,7 @@ def play_media(media_type, tmdb_id):
         season = request.args.get('s', 1, type=int)
         episode = request.args.get('e', 1, type=int)
 
-        stream_url, stream_type, subtitles, servers = extract_stream(imdb_id, media_type, season, episode)
+        stream_url, stream_type, subtitles, servers, debug_log = extract_stream(imdb_id, media_type, season, episode)
         
         # Merge with reliable Stremio subtitles
         stremio_subs = fetch_stremio_subs(media_type, imdb_id, season, episode)
@@ -189,6 +196,7 @@ def play_media(media_type, tmdb_id):
                 'success': False,
                 'error': 'Could not extract direct stream link from backend',
                 'server_count': len(servers),
+                'debug_log': debug_log
             })
     except Exception as e:
         import traceback
