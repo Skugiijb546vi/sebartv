@@ -103,6 +103,11 @@ def fetch_provider_servers(provider, imdb_id, media_type, season, episode):
     return []
 
 def extract_stream(imdb_id, media_type='movie', season=1, episode=1):
+    import os
+    if os.environ.get('RENDER'):
+        fallback_url = f'https://vidsrc.me/embed/movie/{imdb_id}' if media_type == 'movie' else f'https://vidsrc.me/embed/tv/{imdb_id}/{season}/{episode}'
+        return fallback_url, 'iframe', [], [], ["Skipped backend scraping on Render due to Cloudflare blocks"]
+        
     all_servers = []
     
     # Always include the primary provider, plus 2 random ones to ensure reliability
