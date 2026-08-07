@@ -1,0 +1,1329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<base href="/">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="icon" href="images/favicon.ico" sizes="any">
+<script disable-devtool-auto src="https://cdn.jsdelivr.net/npm/disable-devtool@latest"></script>
+<title>VidSrc Player</title>
+<style>
+  *{box-sizing:border-box}
+  /* An author `display` on an id or class outranks the browser's own
+     [hidden]{display:none}. #adv sets display:flex, so setting hidden on it did
+     nothing at all and the advert overlay stayed on top of the film for ever —
+     the video played, invisibly, behind a black box. */
+  [hidden]{display:none!important}
+  html,body{margin:0;height:100%;background:#000;color:#fff;
+    font-family:Inter,system-ui,-apple-system,sans-serif;overflow:hidden}
+  /* Fixed to the viewport rather than inheriting a percentage-height chain.
+     The chain produced fractional sizes (899.2 x 765.6), and sub-pixel layout
+     under a compositor makes the frame shimmer left/right on some GPUs and
+     display scalings. Fixed positioning snaps it to whole pixels. */
+  #wrap{position:fixed;inset:0;background:#000;overflow:hidden}
+  #wrap.hidecursor{cursor:none}
+
+  #art{position:absolute;inset:0;z-index:1;background:#000 center center/cover no-repeat;
+    opacity:0;transition:opacity .5s ease}
+  #art.on{opacity:1}
+  #art::after{content:'';position:absolute;inset:0;background:rgba(0,0,0,.3)}
+
+  video{width:100%;height:100%;display:block;background:transparent;
+    position:relative;z-index:2;opacity:0;transition:opacity .3s ease;
+    object-fit:contain}
+  video.on{opacity:1}
+  video::-webkit-media-controls{display:none!important}
+  /* Subtitles are drawn by us, not the browser. Chrome positions native cues
+     against the VIDEO ELEMENT rather than the picture, so on a letterboxed
+     frame they land in the black bar underneath and sit behind the controls —
+     and its cue renderer lives in a closed shadow root that cannot be
+     repositioned. Rendering them here gives exact placement and sizing. */
+  /* Anchored to the real control bar rather than a percentage: --cb is set from
+     the bar's measured height, so cues sit just above it when it is showing and
+     drop to a small margin when it hides. Works at any size because the bar
+     itself is fluid. */
+  /* z-index 6, above the advertising frame — cues are drawn over the picture
+     and that frame covers all of it. */
+  #cues{position:absolute;left:0;right:0;z-index:6;display:none;
+    justify-content:center;pointer-events:none;padding:0 6%;
+    bottom:var(--cb,26px);transition:bottom .22s ease}
+  #cues.on{display:flex}
+  #cues span{background:rgba(0,0,0,.66);color:#fff;border-radius:4px;
+    padding:.18em .5em;text-align:center;line-height:1.32;
+    font-size:clamp(12px,2.1vmin,26px);
+    font-family:Inter,system-ui,-apple-system,sans-serif;
+    text-shadow:0 1px 2px rgba(0,0,0,.9);white-space:pre-wrap}
+  @media (max-width:640px){
+    #cues{padding:0 4%}
+    #cues span{font-size:clamp(11px,3.4vw,17px)}
+  }
+
+  #overlay{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:5px;text-align:center;
+    background:transparent;z-index:5;pointer-events:none}
+  #overlay.hidden{display:none}
+  .spin{width:clamp(22px,3.4vmin,40px);height:clamp(22px,3.4vmin,40px);
+    border:3px solid rgba(255,255,255,.32);
+    filter:drop-shadow(0 1px 3px rgba(0,0,0,.9));
+    border-top-color:#fff;border-radius:50%;animation:sp 1s linear infinite;
+    margin-bottom:9px}
+  .spin.off{display:none}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  /* Overlay text sits on arbitrary artwork, so layered shadows act as an
+     outline and keep it legible over bright frames. */
+  #msg{font-size:clamp(13px,1.9vmin,22px);font-weight:700;color:#fff;
+    text-shadow:0 0 3px rgba(0,0,0,.95),0 1px 3px rgba(0,0,0,.95),
+                0 2px 14px rgba(0,0,0,.85),0 0 22px rgba(0,0,0,.6)}
+  #sub{font-size:clamp(11px,1.5vmin,17px);color:#f1f3f6;font-weight:600;
+    max-width:78%;line-height:1.5;
+    text-shadow:0 0 3px rgba(0,0,0,.95),0 1px 3px rgba(0,0,0,.95),
+                0 2px 12px rgba(0,0,0,.85),0 0 20px rgba(0,0,0,.55)}
+
+  /* Big centre play button: the plain glyph on its own. No rings and no
+     shadow of any kind — every shadow variant spread a halo that made the icon
+     read as blurry. */
+  #bigplay{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    z-index:4;width:clamp(62px,11vmin,116px);height:clamp(62px,11vmin,116px);
+    background:url('images/play-icon.png') center/contain no-repeat;
+    opacity:.3;
+    cursor:pointer;display:none;transition:transform .18s ease,opacity .18s ease}
+  #bigplay.on{display:block}
+  #bigplay:hover{transform:translate(-50%,-50%) scale(1.06);opacity:1}
+
+  /* ── third-party advertising frame ───────────────────────────────────── */
+  /* Sized over the picture rather than hidden away in a 1x1 corner. A pop-under
+     has to be opened by a real click inside ITS OWN document — a hidden frame
+     never receives one, and a synthetic click carries no user activation — so
+     the frame has to be somewhere the viewer actually clicks.
+     Layered at 3: above the artwork (1) and the video (2), but below the play
+     button (4), the cues (6), the control bar (8), the menus (9) and the
+     pre-roll (20), so every control still takes its own clicks directly. What
+     lands on the frame is relayed back into the player from the script below,
+     which is possible because ads.php is same-origin. */
+  #ads{position:absolute;inset:0;z-index:3;width:100%;height:100%;
+    border:0;background:transparent;display:block}
+
+  /* ── pre-roll advert ─────────────────────────────────────────────────── */
+  /* Above the control bar and the menus: while the advert runs it is the only
+     thing the viewer can interact with, apart from Skip. */
+  #adv{position:absolute;inset:0;z-index:20;background:#000;display:flex;
+    align-items:center;justify-content:center}
+  #advv{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+  /* Covers the video so a click anywhere on the advert follows through, but
+     only exists when a destination was configured. */
+  #advclick{position:absolute;inset:0;z-index:1;cursor:pointer}
+  #advui{position:absolute;right:14px;bottom:14px;z-index:2;display:flex;
+    align-items:center;gap:10px}
+  #advlab{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;
+    color:#fff;background:rgba(0,0,0,.62);border-radius:5px;padding:5px 9px;
+    font-weight:700;user-select:none}
+  #advskip{background:rgba(0,0,0,.68);color:#fff;border:1px solid rgba(255,255,255,.5);
+    border-radius:6px;padding:8px 15px;font-size:13px;font-weight:700;cursor:pointer;
+    font-family:inherit}
+  #advskip:hover{background:#e50914;border-color:#e50914}
+  #advskip[disabled]{cursor:default;opacity:.75;border-color:rgba(255,255,255,.28)}
+  @media (max-width:640px){
+    #advui{right:9px;bottom:9px;gap:7px}
+    #advlab{font-size:10px;padding:4px 7px}
+    #advskip{padding:9px 14px}
+  }
+
+  /* ── control bar ─────────────────────────────────────────────────────── */
+  #bar{position:absolute;left:0;right:0;bottom:0;z-index:8;
+    isolation:isolate;
+    padding:26px 14px 10px;
+    background:linear-gradient(180deg,transparent,rgba(0,0,0,.55) 38%,rgba(0,0,0,.88));
+    opacity:0;transform:translateY(8px);transition:opacity .22s ease,transform .22s ease;
+    pointer-events:none}
+  #bar.show{opacity:1;transform:none;pointer-events:auto}
+
+  #seek{position:relative;height:16px;display:flex;align-items:center;cursor:pointer;
+    margin-bottom:4px}
+  #seek .track{position:relative;width:100%;height:4px;border-radius:3px;
+    background:rgba(255,255,255,.24);overflow:hidden;transition:height .12s ease}
+  #seek:hover .track{height:6px}
+  #seek .buf{position:absolute;inset:0 auto 0 0;width:0;background:rgba(255,255,255,.34)}
+  #seek .fill{position:absolute;inset:0 auto 0 0;width:0;background:#e50914}
+  #seek .knob{position:absolute;top:50%;left:0;width:12px;height:12px;border-radius:50%;
+    background:#fff;transform:translate(-50%,-50%) scale(0);
+    transition:transform .12s ease;box-shadow:0 1px 5px rgba(0,0,0,.6)}
+  #seek:hover .knob{transform:translate(-50%,-50%) scale(1)}
+
+  #btns{display:flex;align-items:center;gap:4px}
+  #btns .sp{flex:1}
+  .cb{display:inline-flex;align-items:center;justify-content:center;
+    width:clamp(32px,4.4vmin,46px);height:clamp(32px,4.4vmin,46px);
+    border:0;background:transparent;color:#fff;cursor:pointer;border-radius:8px;
+    padding:0;position:relative;transition:background .15s ease}
+  .cb:hover{background:rgba(255,255,255,.14)}
+  .cb svg{width:56%;height:56%;fill:currentColor;pointer-events:none}
+  .cb.on{color:#e50914}
+  #time{font-size:clamp(11px,1.4vmin,15px);font-weight:600;color:#e9ecf1;
+    padding:0 8px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  #brand{font-weight:900;letter-spacing:2px;font-size:clamp(11px,1.5vmin,17px);
+    color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.9);padding:0 6px 0 10px;
+    user-select:none;opacity:.92;text-decoration:none;white-space:nowrap;
+    display:inline-flex;align-items:center;transition:opacity .15s ease}
+  a#brand:hover{opacity:1;text-shadow:0 2px 12px rgba(229,9,20,.75)}
+
+  /* Volume rises vertically out of the speaker rather than pushing the control
+     bar sideways. The popup is taken out of flow, so opening it can no longer
+     shove the other buttons around on a narrow phone. */
+  #vol{position:relative;display:flex;align-items:center}
+  #volpop{position:absolute;left:50%;bottom:calc(100% + 8px);
+    transform:translateX(-50%);
+    width:34px;height:104px;display:flex;align-items:center;justify-content:center;
+    background:rgba(18,18,20,.94);border:1px solid rgba(255,255,255,.12);
+    border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.55);
+    opacity:0;visibility:hidden;transition:opacity .16s ease,visibility .16s ease;
+    z-index:10}
+  /* Rotated rather than writing-mode: vertical range inputs only landed in
+     Chrome 119 and are newer still in Safari, and this has to work on whatever
+     phone browser an embedder's visitor turns up with. A transform costs no
+     layout, so the pill above stays exactly 34x104 whatever the input does. */
+  #volpop input{width:88px;margin:0;accent-color:#e50914;cursor:pointer;
+    transform:rotate(-90deg)}
+  /* Hover-reveal ONLY where hover is real. A touch browser fakes a hover for
+     one tap and drops it the instant the finger moves, so the slider appeared
+     and then collapsed halfway through being dragged. Touch opens it via the
+     .open class instead, which nothing can revoke mid-gesture. */
+  @media (hover:hover){ #vol:hover #volpop{opacity:1;visibility:visible} }
+  #vol.open #volpop,#volpop:focus-within{opacity:1;visibility:visible}
+
+  /* ── menus ───────────────────────────────────────────────────────────── */
+  /* Anchored to the control bar's MEASURED height (--cb, set by cuePosition on
+     #wrap) rather than a fixed 96px, and allowed to use all the room actually
+     left above it instead of a vh fraction.
+     An embed on a phone is about 210px tall, and the old rule reserved 96px for
+     the bar and then capped the panel at 46vh — about 96px more — which with
+     50px touch rows showed a single server and looked broken. Both numbers were
+     guesses about a viewport that only exists on a desktop. */
+  .menu{position:absolute;right:14px;bottom:calc(var(--cb,96px) + 4px);z-index:9;
+    min-width:190px;
+    max-width:calc(100% - 28px);
+    max-height:calc(100% - var(--cb,96px) - 16px);
+    overflow-y:auto;overscroll-behavior:contain;
+    padding:6px;border-radius:12px;display:none;
+    /* Opaque, and deliberately NOT backdrop-filter. Blurring the backdrop makes
+       the compositor re-blur the region behind the panel on every frame, and
+       over a playing video that reads as the whole picture shaking. A solid
+       panel costs nothing and is easier to read anyway. */
+    background:#0e0e13;
+    border:1px solid rgba(255,255,255,.1);box-shadow:0 18px 44px rgba(0,0,0,.65)}
+  .menu.on{display:block}
+  .menu::-webkit-scrollbar{width:6px}
+  .menu::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+  .menu h5{margin:2px 4px 7px;font-size:10.5px;font-weight:800;letter-spacing:1.3px;
+    text-transform:uppercase;color:#8b93a1;
+    border-bottom:1px dashed rgba(255,255,255,.12);padding-bottom:7px;
+    display:flex;align-items:center;gap:7px}
+  .menu h5 .cnt{margin-left:auto;color:#6c7484;letter-spacing:.5px}
+  .menu button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+    background:rgba(255,255,255,.03);color:#e7e9ee;border:1px solid transparent;
+    border-radius:9px;padding:8px 10px;margin-bottom:4px;cursor:pointer;
+    font-size:12.5px;font-weight:600;transition:background .15s,border-color .15s}
+  .menu button:hover{background:rgba(255,255,255,.1)}
+  .menu button.sel{background:rgba(229,9,20,.16);border-color:rgba(229,9,20,.7);color:#fff}
+  .menu button.bad{opacity:.4}
+  .menu button.bad .s2{color:#c2554f}
+  .menu .fl{width:22px;height:16px;flex:0 0 auto;border-radius:3px;overflow:hidden;
+    background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center}
+  /* Subtitle rows use a circular badge: a language reads better as a round
+     token than as a rectangular territory flag in a long list. */
+  .menu .fl.rnd{width:22px;height:22px;border-radius:50%;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.16)}
+  .menu .fl.rnd img{transform:scale(1.45)}
+  .menu .fl img{width:100%;height:100%;object-fit:cover;display:block}
+  .menu .tx{display:flex;flex-direction:column;gap:1px;min-width:0}
+  /* Tier icon: filled bars rise with resolution, so the list is scannable
+     without reading every number. */
+  .menu .qi{width:20px;height:16px;flex:0 0 auto;display:flex;align-items:flex-end;
+    justify-content:space-between;gap:2px}
+  .menu .qi i{width:3px;border-radius:1px;background:rgba(255,255,255,.22);display:block}
+  .menu .qi i.f{background:#e50914}
+  .menu .qi i:nth-child(1){height:25%}
+  .menu .qi i:nth-child(2){height:50%}
+  .menu .qi i:nth-child(3){height:75%}
+  .menu .qi i:nth-child(4){height:100%}
+  .menu button.sel .qi i.f{background:#fff}
+
+  /* Tabbed settings panel */
+  #mSet{min-width:240px;padding:0}
+  #tabs{display:flex;gap:2px;padding:6px 6px 0;position:sticky;top:0;z-index:2;
+    background:#0e0e13}
+  #tabs button{flex:1;background:transparent;border:0;color:#8b93a1;cursor:pointer;
+    font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;
+    padding:9px 4px;border-radius:8px 8px 0 0;border-bottom:2px solid transparent;
+    margin:0;transition:color .15s ease,border-color .15s ease}
+  #tabs button:hover{color:#cfd4dd;background:rgba(255,255,255,.05)}
+  #tabs button.sel{color:#fff;border-bottom-color:#e50914;background:transparent}
+  /* No cap and no scroller of its own: #mSet already has both, and a second
+     nested scroller inside it meant the tab body ran out of room before the
+     panel did, so the last servers were unreachable on a short screen. The
+     sticky tab strip keeps the tabs visible while the panel itself scrolls. */
+  #tabbody{padding:7px 6px 6px}
+  .menu .n1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .menu .s2{font-size:10px;font-weight:600;color:#7d8595;letter-spacing:.3px}
+
+  /* ── responsive ──────────────────────────────────────────────────────── */
+  @media (max-width:640px){
+    #bar{padding:22px 8px calc(8px + env(safe-area-inset-bottom))}
+    #time{padding:0 4px}
+    #brand{display:none}
+    .menu{right:6px;left:6px;min-width:0}
+    /* Not display:none — that made the slider impossible to open at all. The
+       popup is shorter on a phone so it clears the bar without covering half
+       the picture. */
+    #volpop{width:32px;height:92px}
+    #volpop input{width:78px}
+  }
+  @media (pointer:coarse){
+    .cb{width:44px;height:44px}
+    .menu button{padding:12px;min-height:50px}
+    #seek{height:24px}
+    #seek .track{height:5px}
+  }
+  /* A 16:9 embed at phone width is only ~210px tall, and the touch sizing above
+     then fits barely two rows in the whole panel. Height, not width, is what is
+     scarce here — a wide landscape phone hits this too — so it keys on height
+     and wins by coming last. */
+  @media (max-height:430px){
+    .menu button{min-height:0;padding:7px 9px;margin-bottom:3px;font-size:12px}
+    .menu h5{margin:0 4px 5px;padding-bottom:5px}
+    .menu .fl.rnd,.menu .fl{width:18px;height:18px}
+    #tabs button{padding:6px 4px}
+    #bar{padding:16px 8px calc(6px + env(safe-area-inset-bottom))}
+  }
+  @media (min-width:1800px){
+    .menu{min-width:250px}
+    .menu button{font-size:15px;padding:11px 13px}
+    #bar{padding:34px 22px 16px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    #art,video,#bar,#bigplay,.cb{transition:none}
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="art"></div>
+  <video id="v" playsinline preload="none" crossorigin="anonymous"></video>
+
+  <!-- Advertising. Its own same-origin document, NOT an inline script: this page
+       is inside the embedder's iframe, so its referrer belongs to the embedder
+       and is frequently absent, which the network scores as no-referrer traffic.
+       ads.php is navigated to by us, so its referrer is ours. Never given a
+       sandbox attribute — that would block the pop-under this is here for. -->
+  <iframe id="ads" src="ads.php" title="" tabindex="-1" aria-hidden="true"
+          scrolling="no" frameborder="0"></iframe>
+
+  <div id="overlay">
+    <div class="spin" id="sp"></div>
+    <div id="msg">Please Wait..</div>
+    <div id="sub">Stream is Loading...</div>
+  </div>
+
+  <div id="cues"></div>
+
+  <div id="bigplay"></div>
+
+  <!-- Pre-roll. Its own element rather than reusing #v: hls.js stays attached
+       to the main video throughout, so nothing has to be torn down and rebuilt
+       between the advert and the feature. -->
+  <div id="adv" hidden>
+    <video id="advv" playsinline preload="auto"></video>
+    <a id="advclick" target="_blank" rel="noopener sponsored nofollow" hidden></a>
+    <div id="advui">
+      <span id="advlab">Advertisement</span>
+      <button id="advskip" type="button" hidden>Skip</button>
+    </div>
+  </div>
+
+  <div id="bar">
+    <div id="seek">
+      <div class="track"><div class="buf"></div><div class="fill"></div></div>
+      <div class="knob"></div>
+    </div>
+    <div id="btns">
+      <button class="cb" id="bPlay" title="Play"></button>
+      <button class="cb" id="bBack" title="Back 10 seconds"></button>
+      <button class="cb" id="bFwd" title="Forward 10 seconds"></button>
+      <div id="vol">
+        <button class="cb" id="bMute" title="Mute"></button>
+        <div id="volpop">
+          <input id="volr" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+        </div>
+      </div>
+      <div id="time">0:00 / 0:00</div>
+      <div class="sp"></div>
+      <button class="cb" id="bSubs" title="Subtitles"></button>
+      <button class="cb" id="bSet" title="Settings"></button>
+      <button class="cb" id="bFs" title="Fullscreen"></button>
+      <a id="brand" href="https://vidsrc.hair/" target="_blank"
+         rel="noopener noreferrer">VIDSRC</a>
+    </div>
+  </div>
+  <div class="menu" id="mSubs"></div>
+  <div class="menu" id="mSet">
+    <div id="tabs"></div>
+    <div id="tabbody"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var Q = {"type":"tv","id":"tt12343534","s":1,"e":1,"t":"eyJjIjoiZjMyYzA1NWZmOWFjNzYxNTM5ODg4NmJjYzQwNTZjMjMiLCJzIjoic3JjfHR2fHR0MTIzNDM1MzR8MXwxIiwiZSI6MTc4NjA1MTY2OH0.tqJ67XhnmCW6EHu_Q6hROF3Fr2wME8SWSWTTP5yA4Uc","ap":false,"art":"https:\/\/image.tmdb.org\/t\/p\/w1280\/lthkKBLe1rX6iThgVFg22O02sJw.jpg","title":"JUJUTSU KAISEN (2020)","pp":false,"ad":"","admax":9,"adskip":5,"adgap":900,"adurl":"","ss":true,"swish":"\/playerswish.php?imdb=tt12343534&t=eyJjIjoiZjMyYzA1NWZmOWFjNzYxNTM5ODg4NmJjYzQwNTZjMjMiLCJzIjoic3dpc2h8dHQxMjM0MzUzNCIsImUiOjE3ODYwNTE2Njh9.vZUK3VuAMYd2Y9iB9pMezWGukphR5BaZqNJC0bFS2pk","ssmin":3};
+
+  var $=function(x){return document.getElementById(x);};
+  var wrap=$('wrap'),video=$('v'),ov=$('overlay'),sp=$('sp'),msg=$('msg'),sub=$('sub'),
+      art=$('art'),bar=$('bar'),bigplay=$('bigplay'),
+      seek=$('seek'),fill=seek.querySelector('.fill'),buf=seek.querySelector('.buf'),
+      knob=seek.querySelector('.knob'),timeEl=$('time'),
+      mSubs=$('mSubs'),mSet=$('mSet'),tabs=$('tabs'),tabbody=$('tabbody'),volr=$('volr'),
+      cues=$('cues');
+
+  var engine=null,list=[],tries=0,idx=0,tried={},dead={},moreTimer=null;
+  var LOAD_TIMEOUT=10000,watchdog=null,startedAt=0,scored=false,hlsReady=null;
+  var subsLoaded=false,hideTimer=null;
+
+  var I={
+    play:'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
+    pause:'<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
+    back:'<svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/><text x="12" y="16" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor">10</text></svg>',
+    fwd:'<svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/><text x="12" y="16" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor">10</text></svg>',
+    vol:'<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>',
+    mute:'<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9H4zm15.5 3l2.5-2.5-1.4-1.4L18 10.6 15.4 8 14 9.4l2.6 2.6L14 14.6l1.4 1.4 2.6-2.6 2.6 2.6 1.4-1.4z"/></svg>',
+    cc:'<svg viewBox="0 0 24 24"><path d="M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM11 11H9.5v-.5h-2v3h2V13H11v1a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1z"/></svg>',
+    hd:'<svg viewBox="0 0 24 24"><path d="M3 5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H3zm5 4v2H6V9H4v6h2v-2h2v2h2V9H8zm6 0v6h3a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-3zm2 1.5h1a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.5.5h-1v-3z"/></svg>',
+    cloud:'<svg viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/></svg>',
+    fs:'<svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>',
+    fsx:'<svg viewBox="0 0 24 24"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>',
+    globe:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></svg>',
+    gear:'<svg viewBox="0 0 24 24"><path d="M19.4 13a7.8 7.8 0 0 0 0-2l2.1-1.6a.5.5 0 0 0 .1-.6l-2-3.5a.5.5 0 0 0-.6-.2l-2.5 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6a.5.5 0 0 0-.5-.4h-4a.5.5 0 0 0-.5.4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.5-1a.5.5 0 0 0-.6.2l-2 3.5a.5.5 0 0 0 .1.6L4.6 11a7.8 7.8 0 0 0 0 2l-2.1 1.6a.5.5 0 0 0-.1.6l2 3.5a.5.5 0 0 0 .6.2l2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.6a.5.5 0 0 0 .5.4h4a.5.5 0 0 0 .5-.4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.5 1a.5.5 0 0 0 .6-.2l2-3.5a.5.5 0 0 0-.1-.6L19.4 13zM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5z"/></svg>'
+  };
+  $('bPlay').innerHTML=I.play; $('bBack').innerHTML=I.back; $('bFwd').innerHTML=I.fwd;
+  $('bMute').innerHTML=I.vol; $('bSubs').innerHTML=I.cc;
+  $('bSet').innerHTML=I.gear; $('bFs').innerHTML=I.fs;
+
+  function busy(m,s){ov.classList.remove('hidden');sp.classList.remove('off');
+    msg.textContent=m;sub.textContent=s||'';}
+  function stopMsg(m,s){ov.classList.remove('hidden');sp.classList.add('off');
+    msg.textContent=m;sub.textContent=s||'';}
+  function hide(){ov.classList.add('hidden');}
+
+  function showArt(url){
+    if(!url||art.dataset.set)return;
+    art.dataset.set='1';
+    var im=new Image();
+    im.onload=function(){art.style.backgroundImage='url("'+url+'")';art.classList.add('on');};
+    im.src=url;
+  }
+  function hideArt(){art.classList.remove('on');}
+  function restoreArt(){if(art.dataset.set)art.classList.add('on');}
+
+  if(Q.title)document.title=Q.title;
+  if(Q.art)showArt(Q.art);
+  busy('Please Wait..','Stream is Loading...');
+
+  // ── sandbox refusal ──────────────────────────────────────────────────────
+  // A sandboxed iframe strips the advertising that pays for this, so playback is
+  // refused rather than served for free. Three verdicts, because one common case
+  // cannot be settled on load:
+  //
+  //   sandboxed - proven, and this covers almost everything in practice. Either
+  //               a sandbox symptom is visible on this document (see
+  //               opaqueOrigin), or a sandbox attribute is readable on one of
+  //               our ancestor frames.
+  //   clean     - not framed, or the whole ancestor chain was walked to the top
+  //               and carried no sandbox anywhere.
+  //   unknown   - a CROSS-ORIGIN ancestor blocks the walk AND no symptom showed
+  //               on this document. Rare; settled at the first click.
+  //
+  // The chain is walked rather than just the immediate parent because sandbox
+  // flags PROPAGATE: a page sandboxed by its own embedder passes those same
+  // restrictions down to every frame it contains, so a player nested two deep
+  // is just as restricted while its own iframe tag looks perfectly clean. That
+  // nesting case is invisible to a check that only reads window.frameElement.
+  // Symptoms of being sandboxed, checked on this document rather than on the
+  // embedder's markup, so they work at any nesting depth and across origins.
+  //
+  // The first three only appear WITHOUT allow-same-origin, which is why the
+  // document.domain write matters most: assigning it is forbidden in a
+  // sandboxed frame whatever flags are set, so it catches
+  // "allow-scripts allow-same-origin" — the one embedders actually use, and the
+  // one every other check here misses.
+  function opaqueOrigin(){
+    try{ if(window.top===window.self)return false; }catch(e){ return false; }
+    try{ if(String(window.origin||'')==='null')return true; }catch(e){ return true; }
+    try{ if(String(location.origin||'')==='null')return true; }catch(e){}
+    try{ window.localStorage.getItem('_sb'); }catch(e){ return true; }
+    try{ var d=document.domain; document.domain=d; }catch(e){ return true; }
+    return false;
+  }
+
+  function sandboxVerdict(){
+    if(opaqueOrigin())return 'sandboxed';
+    if(window.top===window.self)return 'clean';        // not embedded at all
+
+    var w=window;
+    try{
+      for(var hops=0; w!==window.top && hops<20; hops++){
+        var fe=w.frameElement;      // null once a parent is cross-origin
+        if(!fe||!fe.hasAttribute)return 'unknown';
+        if(fe.hasAttribute('sandbox'))return 'sandboxed';
+        w=w.parent;
+      }
+    }catch(e){ return 'unknown'; }  // cross-origin ancestor: cannot see past it
+    return 'clean';
+  }
+
+  function sandboxDeny(){
+    try{ video.pause(); }catch(e){}
+    stopMsg('Sandbox is not allowed',
+            'Remove the sandbox attribute from the iframe to play the video.');
+  }
+
+  var SB = sandboxVerdict();
+  if(SB==='sandboxed'){ sandboxDeny(); return; }
+
+  // Settling the 'unknown' case: what such a sandbox actually takes away is
+  // window.open. No sandbox attribute written in the wild includes
+  // allow-popups — removing pop-under advertising is usually the whole point —
+  // so a blocked window.open is both the reliable signal and the exact
+  // capability the revenue depends on.
+  //
+  // It has to wait for a REAL user gesture, and isTrusted is what proves one:
+  // every browser's own popup blocker refuses an ungestured window.open on any
+  // page, sandbox or not, so probing on load would condemn honest embedders. A
+  // synthetic click proves nothing either way and is ignored. The window is
+  // opened blank and closed on the same tick.
+  //
+  // CONSEQUENCE: an autoplay embed the viewer never clicks is never probed, and
+  // plays. Set 'sandbox_popup_probe' => false in config.php to disable this
+  // entirely if the momentary popup proves disruptive; the proven checks above
+  // keep working either way.
+  var sbProbed=false;
+  function popupsBlocked(){
+    try{
+      var w=window.open('about:blank','_blank');
+      if(w&&!w.closed){ try{ w.close(); }catch(e){} return false; }
+    }catch(err){
+      // Some browsers name the sandbox outright in the thrown message.
+      if(/sandbox/i.test(String((err&&(err.message||err.name))||'')))return true;
+    }
+    return true;   // refused during a genuine gesture: no allow-popups
+  }
+  if(SB==='unknown'&&Q.pp!==false){
+    // Capture phase, so the verdict lands before any handler acts on the click.
+    wrap.addEventListener('click',function(ev){
+      if(sbProbed||SB!=='unknown')return;
+      if(!ev||ev.isTrusted===false)return;      // synthetic: inconclusive
+      sbProbed=true;
+      if(!popupsBlocked())return;               // popups fine: honest embed
+      ev.preventDefault(); ev.stopPropagation();
+      SB='sandboxed';
+      sandboxDeny();
+    },true);
+  }
+
+  if(!Q.id){stopMsg('Unavailable','');return;}
+  var qs='type='+Q.type+'&id='+encodeURIComponent(Q.id)+'&s='+Q.s+'&e='+Q.e
+        +'&t='+encodeURIComponent(Q.t);
+
+  // ── control bar behaviour ────────────────────────────────────────────────
+  function menusOpen(){return mSubs.classList.contains('on')||mSet.classList.contains('on');}
+  function showBar(){
+    bar.classList.add('show');wrap.classList.remove('hidecursor');
+    cuePosition();
+    clearTimeout(hideTimer);
+    if(video.paused||menusOpen())return;
+    cuePosition();
+    hideTimer=setTimeout(function(){
+      bar.classList.remove('show');wrap.classList.add('hidecursor');
+      cuePosition();
+    },3000);
+  }
+  function closeMenus(except){
+    [mSubs,mSet].forEach(function(m){if(m!==except)m.classList.remove('on');});
+  }
+  ['mousemove','touchstart','click','keydown'].forEach(function(ev){
+    wrap.addEventListener(ev,showBar,{passive:true});
+  });
+  video.addEventListener('click',function(){toggle();});
+  // The first press starts the ADVERT, not the feature — and because that press
+  // is a real user gesture, the advert is allowed to play with sound.
+  bigplay.onclick=function(){ if(advDue&&!advRan){advStart();return;} toggle(); };
+
+  function toggle(){ if(video.paused)video.play().catch(function(){}); else video.pause(); }
+  $('bPlay').onclick=function(e){
+    e.stopPropagation();
+    if(advDue&&!advRan){advStart();return;}
+    toggle();
+  };
+
+  function syncPlay(){
+    $('bPlay').innerHTML=video.paused?I.play:I.pause;
+    $('bPlay').title=video.paused?'Play':'Pause';
+    bigplay.classList.toggle('on',video.paused&&video.classList.contains('on'));
+    if(video.paused)showBar();
+  }
+  video.addEventListener('play',syncPlay);
+  video.addEventListener('pause',syncPlay);
+
+  function fmt(t){
+    if(!isFinite(t)||t<0)t=0;
+    var h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=Math.floor(t%60);
+    return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0');
+  }
+  video.addEventListener('timeupdate',function(){
+    var d=video.duration||0,c=video.currentTime||0;
+    var pc=d?(c/d*100):0;
+    fill.style.width=pc+'%';knob.style.left=pc+'%';
+    timeEl.textContent=fmt(c)+' / '+fmt(d);
+    if(video.buffered.length)
+      buf.style.width=((video.buffered.end(video.buffered.length-1)/(d||1))*100)+'%';
+  });
+
+  function seekTo(ev){
+    var r=seek.getBoundingClientRect();
+    var x=(ev.touches?ev.touches[0].clientX:ev.clientX)-r.left;
+    var p=Math.max(0,Math.min(1,x/r.width));
+    if(video.duration)video.currentTime=p*video.duration;
+  }
+  var scrubbing=false;
+  seek.addEventListener('mousedown',function(e){scrubbing=true;seekTo(e);});
+  document.addEventListener('mousemove',function(e){if(scrubbing)seekTo(e);});
+  document.addEventListener('mouseup',function(){scrubbing=false;});
+  seek.addEventListener('touchstart',function(e){seekTo(e);},{passive:true});
+  seek.addEventListener('touchmove',function(e){seekTo(e);},{passive:true});
+
+  $('bBack').onclick=function(){video.currentTime=Math.max(0,video.currentTime-10);};
+  $('bFwd').onclick=function(){video.currentTime=Math.min(video.duration||0,video.currentTime+10);};
+
+  // On a touch device the speaker opens the slider instead of relying on hover.
+  // First tap reveals it and changes nothing else — muting on that tap would
+  // silence the video for anyone who only wanted to turn it down. A second tap
+  // mutes, and the panel stays up either way so it can actually be dragged.
+  // Dismissed by tapping away, or by five seconds of doing nothing. The timer is
+  // restarted by ANY activity on the control — every drag fires input
+  // continuously, so it cannot expire mid-gesture, which was the original
+  // disappearing act.
+  var volWrap=$('vol'),volTimer=null,coarse=false;
+  try{ coarse=window.matchMedia('(pointer:coarse)').matches; }catch(e){}
+
+  function volPoke(){
+    if(!volWrap.classList.contains('open'))return;
+    if(volTimer)clearTimeout(volTimer);
+    volTimer=setTimeout(volClose,5000);
+  }
+  function volOpen(){ if(!coarse)return; volWrap.classList.add('open'); volPoke(); }
+  function volClose(){
+    if(volTimer){clearTimeout(volTimer);volTimer=null;}
+    volWrap.classList.remove('open');
+  }
+
+  $('bMute').onclick=function(e){
+    e.stopPropagation();
+    // The speaker keeps its ordinary job — it always toggles mute. On touch it
+    // additionally opens the slider, and tapping it again closes it, so the same
+    // button both reveals and dismisses.
+    video.muted=!video.muted;syncVol();
+    volOpen();                       // stays up; only a tap away or idle closes it
+  };
+
+  // Setting a level deliberately does NOT close the panel: a viewer adjusting
+  // volume usually wants another nudge, and closing under them mid-adjustment
+  // is the same annoyance as the slider vanishing did.
+  volr.oninput=function(){
+    video.volume=parseFloat(volr.value);video.muted=(video.volume===0);syncVol();
+    volPoke();
+  };
+
+  // Touching or moving over the control counts as activity too, so a slow drag
+  // that pauses between input events still keeps the panel alive.
+  ['pointerdown','pointermove','touchstart','touchmove'].forEach(function(ev){
+    volWrap.addEventListener(ev,volPoke,{passive:true});
+  });
+
+  document.addEventListener('click',function(e){
+    if(!volWrap.contains(e.target))volClose();
+  },true);
+  function syncVol(){
+    $('bMute').innerHTML=(video.muted||video.volume===0)?I.mute:I.vol;
+    volr.value=video.muted?0:video.volume;
+  }
+  syncVol();
+
+  // Fullscreen across three different APIs, because the unprefixed one is not
+  // enough on a phone — which is where fullscreen matters most.
+  //
+  //   standard   every desktop browser and Android Chrome.
+  //   webkit     older Android and Safari on the desktop.
+  //   iOS        the iPhone has NO element-level fullscreen at all: Element
+  //              .requestFullscreen simply does not exist, so the old code
+  //              evaluated `wrap.requestFullscreen &&` to undefined and the
+  //              button silently did nothing. The only route is asking the VIDEO
+  //              element to go fullscreen itself, which hands playback to the
+  //              system player — our control bar goes with it, but a working
+  //              fullscreen beats a dead button.
+  function fsEl(){
+    return document.fullscreenElement||document.webkitFullscreenElement||null;
+  }
+  function fsEnter(){
+    if(wrap.requestFullscreen)return wrap.requestFullscreen().catch(function(){});
+    if(wrap.webkitRequestFullscreen)return wrap.webkitRequestFullscreen();
+    // iPhone: only the video element can do it, and only once it has a source.
+    if(video.webkitEnterFullscreen){ try{ video.webkitEnterFullscreen(); }catch(e){} }
+  }
+  function fsExit(){
+    if(document.exitFullscreen)return document.exitFullscreen().catch(function(){});
+    if(document.webkitExitFullscreen)return document.webkitExitFullscreen();
+    if(video.webkitExitFullscreen){ try{ video.webkitExitFullscreen(); }catch(e){} }
+  }
+  $('bFs').onclick=function(){ if(fsEl())fsExit(); else fsEnter(); };
+  function fsSync(){
+    $('bFs').innerHTML=fsEl()?I.fsx:I.fs;
+    cuePosition();
+  }
+  ['fullscreenchange','webkitfullscreenchange'].forEach(function(ev){
+    document.addEventListener(ev,fsSync);
+  });
+
+  // Keyboard, the way every desktop player behaves.
+  document.addEventListener('keydown',function(e){
+    if(e.target&&/input|textarea/i.test(e.target.tagName))return;
+    var k=e.key.toLowerCase();
+    if(k===' '||k==='k'){e.preventDefault();toggle();}
+    else if(k==='arrowleft')video.currentTime=Math.max(0,video.currentTime-10);
+    else if(k==='arrowright')video.currentTime=Math.min(video.duration||0,video.currentTime+10);
+    else if(k==='arrowup'){video.volume=Math.min(1,video.volume+.1);syncVol();}
+    else if(k==='arrowdown'){video.volume=Math.max(0,video.volume-.1);syncVol();}
+    else if(k==='m'){video.muted=!video.muted;syncVol();}
+    else if(k==='f')$('bFs').onclick();
+    else if(k==='escape')closeMenus();
+  });
+
+  // ── menus ────────────────────────────────────────────────────────────────
+  function menuBtn(label,note,sel,flagCC,onClick,badTxt,round){
+    var b=document.createElement('button');
+    if(flagCC!==undefined){
+      var f=document.createElement('span');f.className='fl'+(round?' rnd':'');
+      if(flagCC){var im=document.createElement('img');
+        im.src='https://flagcdn.com/w40/'+flagCC+'.png';im.alt='';im.loading='lazy';
+        im.onerror=function(){f.innerHTML=I.globe;};f.appendChild(im);}
+      else f.innerHTML=I.globe;
+      b.appendChild(f);
+    }
+    var t=document.createElement('span');t.className='tx';
+    var n=document.createElement('span');n.className='n1';n.textContent=label;
+    t.appendChild(n);
+    if(note!==null&&note!==undefined){
+      var s2=document.createElement('span');s2.className='s2';s2.textContent=badTxt||note;
+      t.appendChild(s2);
+    }
+    b.appendChild(t);
+    if(sel)b.classList.add('sel');
+    if(badTxt)b.classList.add('bad');
+    b.onclick=onClick;
+    return b;
+  }
+  function head(m,txt,count){
+    var h=document.createElement('h5');
+    h.innerHTML='<span>'+txt+'</span>'+(count!==undefined?'<span class="cnt">'+count+'</span>':'');
+    m.appendChild(h);
+  }
+  function toggleMenu(m,build){
+    if(m.classList.contains('on')){m.classList.remove('on');return;}
+    closeMenus(m);build();m.classList.add('on');showBar();
+  }
+  document.addEventListener('click',function(e){
+    if(!bar.contains(e.target))closeMenus();
+  });
+
+  // One gear holds everything about HOW a title plays. Subtitles keep their own
+  // button because viewers reach for them far more often than for quality.
+  var setTab='servers';
+  $('bSet').onclick=function(e){
+    e.stopPropagation();
+    // Touching the gear hands control to the viewer: the automatic close must
+    // not then shut a panel they deliberately opened.
+    autoServers=false;
+    toggleMenu(mSet,function(){buildSet();});
+  };
+
+  function audioTracks(){
+    if(engine&&engine.audioTracks&&engine.audioTracks.length>1)return engine.audioTracks;
+    return [];
+  }
+
+  function buildSet(){
+    var avail=[['servers','Servers'],['quality','Quality']];
+    if(audioTracks().length)avail.push(['audio','Audio']);
+    // A tab can disappear when the source changes; never leave the panel empty.
+    if(!avail.some(function(t){return t[0]===setTab;}))setTab=avail[0][0];
+
+    tabs.innerHTML='';
+    avail.forEach(function(t){
+      var b=document.createElement('button');
+      b.textContent=t[1];
+      if(t[0]===setTab)b.classList.add('sel');
+      b.onclick=function(ev){ev.stopPropagation();setTab=t[0];buildSet();};
+      tabs.appendChild(b);
+    });
+
+    tabbody.innerHTML='';
+    if(setTab==='servers')fillServers();
+    else if(setTab==='quality')fillQuality();
+    else fillAudio();
+  }
+
+  function fillServers(){
+    list.forEach(function(x,i){
+      tabbody.appendChild(menuBtn(x.name,x.lang||'Streaming Source',i===idx,x.flag||'',
+        function(ev){ev.stopPropagation();closeMenus();play(i,false);},dead[x.k]));
+    });
+  }
+
+  // Bars fill with resolution tier, so relative quality reads at a glance
+  // without parsing every number.
+  function qualBars(h){
+    var n = h>=2160?4 : h>=1080?3 : h>=720?2 : 1;
+    var w=document.createElement('span');w.className='qi';
+    for(var i=1;i<=4;i++){
+      var b=document.createElement('i');
+      if(i<=n)b.className='f';
+      w.appendChild(b);
+    }
+    return w;
+  }
+  function tierName(h){
+    return h>=2160?'Ultra HD' : h>=1080?'Full HD' : h>=720?'HD' : 'SD';
+  }
+  function qualRow(label,note,sel,h,onClick){
+    var b=document.createElement('button');
+    b.appendChild(qualBars(h));
+    var t=document.createElement('span');t.className='tx';
+    var n=document.createElement('span');n.className='n1';n.textContent=label;
+    t.appendChild(n);
+    if(note){var s2=document.createElement('span');s2.className='s2';s2.textContent=note;t.appendChild(s2);}
+    b.appendChild(t);
+    if(sel)b.classList.add('sel');
+    b.onclick=onClick;
+    return b;
+  }
+
+  function fillQuality(){
+    if(!engine||!engine.levels||!engine.levels.length){
+      tabbody.appendChild(qualRow('Auto','Adaptive',true,720,
+        function(ev){ev.stopPropagation();closeMenus();}));
+      return;
+    }
+    var cur=engine.levels[engine.currentLevel];
+    // -1 is hls.js ABR: the level follows measured bandwidth. That is the
+    // adaptive behaviour and stays the default.
+    tabbody.appendChild(qualRow('Auto',
+      cur?('Adaptive - now '+cur.height+'p'):'Adaptive',
+      engine.autoLevelEnabled,cur?cur.height:720,
+      function(ev){ev.stopPropagation();engine.currentLevel=-1;buildSet();}));
+
+    engine.levels.map(function(l,i){return {l:l,i:i};})
+      .sort(function(a,b){return (b.l.height||0)-(a.l.height||0);})
+      .forEach(function(o){
+        var h=o.l.height||0,kbps=Math.round((o.l.bitrate||0)/1000);
+        tabbody.appendChild(qualRow(h?h+'p':'Level '+(o.i+1),
+          tierName(h)+(kbps?' - '+kbps+' kbps':''),
+          !engine.autoLevelEnabled&&engine.currentLevel===o.i,h,
+          function(ev){ev.stopPropagation();engine.currentLevel=o.i;buildSet();}));
+      });
+  }
+
+  function fillAudio(){
+    audioTracks().forEach(function(t,i){
+      tabbody.appendChild(menuBtn(t.name||t.lang||('Track '+(i+1)),t.lang||null,
+        engine.audioTrack===i,'',
+        function(ev){ev.stopPropagation();engine.audioTrack=i;buildSet();},null,true));
+    });
+  }
+
+  $('bSubs').onclick=function(e){e.stopPropagation();toggleMenu(mSubs,buildSubs);};
+  var subs=[],subOn=-1;
+  function buildSubs(){
+    mSubs.innerHTML='';head(mSubs,'Subtitles',subs.length||undefined);
+    mSubs.appendChild(menuBtn('Off',null,subOn<0,'',function(ev){
+      ev.stopPropagation();setSub(-1);closeMenus();},null,true));
+    if(!subsLoaded){
+      mSubs.appendChild(menuBtn('Loading…',null,false,undefined,function(ev){ev.stopPropagation();}));
+      loadSubs();
+      return;
+    }
+    subs.forEach(function(x,i){
+      mSubs.appendChild(menuBtn(x.label,x.lang||null,subOn===i,x.cc||'',
+        function(ev){ev.stopPropagation();setSub(i);closeMenus();},null,true));
+    });
+  }
+  function loadSubs(){
+    if(subsLoaded)return;
+    fetch('api.php?a=subs&'+qs,{cache:'no-store'})
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(d){
+        subsLoaded=true;
+        subs=(d&&d.subs)||[];
+        if(mSubs.classList.contains('on'))buildSubs();
+      })
+      .catch(function(){subsLoaded=true;if(mSubs.classList.contains('on'))buildSubs();});
+  }
+  function setSub(i){
+    // Remove any existing track first; browsers keep stale cues otherwise.
+    [].slice.call(video.querySelectorAll('track')).forEach(function(t){t.remove();});
+    for(var j=0;j<video.textTracks.length;j++)video.textTracks[j].mode='disabled';
+    cues.innerHTML='';cues.classList.remove('on');
+    subOn=i;
+    $('bSubs').classList.toggle('on',i>=0);
+    if(i<0||!subs[i])return;
+    var tr=document.createElement('track');
+    tr.kind='subtitles';tr.label=subs[i].label;tr.srclang=(subs[i].lang||'en').slice(0,2);
+    tr.src='api.php?a=sub&ref='+encodeURIComponent(subs[i].ref);
+    tr.default=true;
+    video.appendChild(tr);
+    tr.addEventListener('load',function(){
+      if(!video.textTracks.length)return;
+      var t=video.textTracks[video.textTracks.length-1];
+      t.mode='hidden';                       // parsed, but not drawn by Chrome
+      t.addEventListener('cuechange',function(){paintCues(t);});
+      paintCues(t);
+      cuePosition();
+    });
+  }
+
+  // The track is loaded but kept in 'hidden' mode: that still fires cuechange
+  // and populates activeCues while suppressing the browser's own drawing, which
+  // we cannot position. Everything visible is rendered here instead.
+  function paintCues(track){
+    cues.innerHTML='';
+    if(!track||!track.activeCues||!track.activeCues.length){cues.classList.remove('on');return;}
+    var box=document.createElement('span');
+    for(var i=0;i<track.activeCues.length;i++){
+      if(i)box.appendChild(document.createElement('br'));
+      // getCueAsHTML keeps VTT markup (italics and so on) and is parsed by the
+      // browser, so nothing unsanitised from a subtitle file reaches the DOM.
+      box.appendChild(track.activeCues[i].getCueAsHTML());
+    }
+    cues.appendChild(box);
+    cues.classList.add('on');
+  }
+  function activeTrack(){
+    for(var i=0;i<video.textTracks.length;i++){
+      if(video.textTracks[i].mode==='hidden'||video.textTracks[i].mode==='showing')
+        return video.textTracks[i];
+    }
+    return null;
+  }
+  function repaintCues(){paintCues(activeTrack());}
+
+  // Sit the cues directly above the control bar while it is visible, and let
+  // them drop to a small bottom margin once it hides. The bar is measured
+  // rather than assumed, so this holds on a phone and a TV alike.
+  var CUE_GAP=14;
+  function cuePosition(){
+    var showing=bar.classList.contains('show');
+    var h=showing?bar.getBoundingClientRect().height:0;
+    // Set on #wrap, not on #cues: the menus are anchored to the same measurement
+    // and are siblings of the cues, so it has to live on their common parent for
+    // both to inherit it. A menu is only ever open while the bar is showing, so
+    // it never sees the collapsed value.
+    wrap.style.setProperty('--cb',(h+CUE_GAP)+'px');
+  }
+  addEventListener('resize',cuePosition);
+  document.addEventListener('fullscreenchange',cuePosition);
+
+  // ── sources ──────────────────────────────────────────────────────────────
+  function load(){
+    fetch('api.php?a=sources&'+qs,{cache:'no-store'})
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
+      .then(function(res){
+        var d=res.j;
+        if(d.status==='ok'){list=d.servers||[];ready(d);return;}
+        if(d.status==='none'){stopMsg('No stream available for now','Please check back later.');return;}
+        if(!res.ok||d.error){stopMsg('Not available','Please check the link.');return;}
+        tries++;
+        if(tries>60){stopMsg('No stream available for now','Please check back later.');return;}
+        busy('Please Wait..','Stream is Loading...');
+        setTimeout(load,2000);
+      })
+      .catch(function(){stopMsg('Not available','Please try again later.');});
+  }
+
+  // The server list is opened as soon as it exists, because nothing else tells a
+  // viewer the gear can switch servers — a list they never see is a list they
+  // never use. It closes itself the moment the stream actually starts, so it
+  // costs nothing once playback is under way.
+  //
+  // Tied to the 'playing' event rather than the play() call: play() only means
+  // we asked, and with autoplay blocked (the usual case for an unmuted embed)
+  // the panel should stay up precisely because nothing is playing yet.
+  // A cached stream can start almost instantly, which would flash the panel open
+  // and shut before anyone could read it — defeating the entire point. It is
+  // therefore held for a minimum time and only then allowed to close.
+  var autoServers=false,autoServersAt=0,autoServersTimer=null;
+  var SERVERS_MIN_MS=Math.max(0,(Q.ssmin||0)*1000);
+
+  function showServers(){
+    if(!list.length||menusOpen())return;
+    setTab='servers';
+    closeMenus(mSet);
+    buildSet();
+    mSet.classList.add('on');
+    showBar();
+    autoServers=true;
+    autoServersAt=Date.now();
+  }
+  function hideAutoServers(){
+    if(!autoServers)return;
+    var left=SERVERS_MIN_MS-(Date.now()-autoServersAt);
+    if(left>0){                        // too soon: finish the minimum first
+      if(!autoServersTimer){
+        autoServersTimer=setTimeout(function(){autoServersTimer=null;hideAutoServers();},left);
+      }
+      return;
+    }
+    autoServers=false;                 // only ever auto-closes once
+    mSet.classList.remove('on');
+  }
+  video.addEventListener('playing',hideAutoServers);
+
+  // ── pre-roll advert ──────────────────────────────────────────────────────
+  // Runs once, in front of the first source, and then never again for this
+  // viewer until the gap expires. Two rules shape everything below:
+  //
+  //   1. The advert may NEVER prevent the feature from playing. A missing file,
+  //      a decode error, a browser that refuses to start it — every failure
+  //      path calls advDone() and the film plays. An advert that costs a
+  //      playback is worth less than no advert.
+  //   2. It is armed on the viewer's play gesture, not on load. A gesture
+  //      carries permission to play WITH SOUND; an advert that autoplays on
+  //      load must be muted, and a muted advert is worth a fraction of an
+  //      audible one.
+  var advDue = false, advRan = false, advTimer = null, advFallback = null;
+  var advWrap=$('adv'), advV=$('advv'), advSkip=$('advskip'), advLab=$('advlab');
+
+  var ADV_KEY = 'adv_last';
+  function advAllowed(){
+    if(!Q.ad)return false;
+    // ?adtest=1 ignores the gap. Testing a pre-roll is otherwise miserable:
+    // the first view consumes the slot and the next fifteen minutes show
+    // nothing, which reads exactly like the feature being broken.
+    if(/[?&]adtest=1/.test(location.search))return true;
+    var gap=(Q.adgap||0)*1000;
+    if(gap<=0)return true;
+    try{
+      var last=parseInt(localStorage.getItem(ADV_KEY)||'0',10);
+      return !last || (Date.now()-last)>gap;
+    }catch(e){ return true; }   // private mode: show it rather than lose it
+  }
+  function advStamp(){ try{ localStorage.setItem(ADV_KEY,String(Date.now())); }catch(e){} }
+
+  function advCleanup(){
+    if(advTimer){clearInterval(advTimer);advTimer=null;}
+    if(advFallback){clearTimeout(advFallback);advFallback=null;}
+    try{ advV.pause(); }catch(e){}
+    advV.removeAttribute('src'); advV.load();
+    advWrap.hidden=true;
+  }
+
+  /** The single exit: tidy up and hand over to the feature. */
+  function advDone(){
+    if(!advDue)return;
+    advDue=false;
+    advCleanup();
+    busy('Please Wait..','Stream is Loading...');
+    play(0,true);
+  }
+
+  function advStart(){
+    if(!advDue||advRan)return;
+    advRan=true;
+    // NOT stamped here. Stamping on arming meant an advert that failed to play
+    // still consumed the viewer's slot, so a broken advert hid itself for the
+    // next fifteen minutes and looked like the feature had stopped working.
+    // The stamp is written from 'playing', once it has genuinely started.
+
+    advWrap.hidden=false;
+    hide();                                   // drop the spinner behind it
+    advSkip.hidden=(Q.adskip<0);
+    advSkip.disabled=true;
+    advSkip.textContent=Q.adskip>0?('Skip in '+Q.adskip):'Skip';
+
+    if(Q.adurl){ var a=$('advclick'); a.href=Q.adurl; a.hidden=false; }
+
+    // Nothing playable within a few seconds means a bad file or a blocked
+    // decode; do not make the viewer wait on it.
+    advFallback=setTimeout(advDone,6000);
+
+    // How long the advert will actually run: the file's own length, or the hard
+    // cap, whichever comes first. Resolved once metadata lands so the countdown
+    // is correct from its very first frame rather than starting at the file
+    // length and then jumping when the cap bites.
+    function advEnds(){
+      var d=advV.duration;
+      if(!isFinite(d)||d<=0)d=Q.admax>0?Q.admax:0;
+      if(Q.admax>0)d=Math.min(d,Q.admax);
+      return d;
+    }
+    function advTick(){
+      var left=Math.ceil((Q.adskip||0)-advV.currentTime);
+      if(Q.adskip>0&&left>0){ advSkip.textContent='Skip in '+left; }
+      else { advSkip.disabled=false; advSkip.textContent='Skip Ad'; }
+
+      var total=advEnds();
+      if(total>0){
+        var rem=Math.max(0,Math.ceil(total-advV.currentTime));
+        advLab.textContent='Ad · '+rem+'s';
+        // The cap, enforced against real playback position rather than a
+        // wall-clock timer, so pausing or buffering cannot cut it short.
+        if(Q.admax>0&&advV.currentTime>=Q.admax){ advDone(); }
+      }
+    }
+
+    advV.onended=advDone;
+    advV.onerror=advDone;
+    advV.onplaying=function(){
+      if(advFallback){clearTimeout(advFallback);advFallback=null;}
+      advStamp();                       // it really played: now spend the slot
+    };
+    // Paint the countdown as soon as the length is known, not on first tick.
+    advV.onloadedmetadata=advTick;
+    advV.ontimeupdate=advTick;
+
+    // Stall watchdog. Observed once in testing: playback froze mid-advert with
+    // no error, no 'stalled' event and no 'pause' — the element simply stopped
+    // advancing, which would have left the viewer staring at a dead frame for
+    // ever. Nothing recovers from that on its own, so four seconds without
+    // progress hands over to the feature.
+    var advAt=-1, advStuck=0;
+    advTimer=setInterval(function(){
+      if(advV.paused||advV.ended)return;
+      if(Math.abs(advV.currentTime-advAt)<0.05){
+        if(++advStuck>=8)advDone();
+      } else { advStuck=0; advAt=advV.currentTime; }
+    },500);
+
+    advV.src=Q.ad;
+    var p=advV.play();
+    if(p&&p.catch){
+      p.catch(function(){
+        // Refused unmuted — almost always an autoplay embed with no gesture
+        // yet. Retry silently rather than skipping the advert entirely.
+        advV.muted=true;
+        var p2=advV.play();
+        if(p2&&p2.catch)p2.catch(advDone);
+      });
+    }
+  }
+
+  advSkip.onclick=function(e){ e.stopPropagation(); if(!advSkip.disabled)advDone(); };
+
+  function ready(d){
+    if(d.title)document.title=d.title;
+    if(d.art)showArt(d.art);
+    if(!list.length){stopMsg('No stream available for now','Please check back later.');return;}
+    if(d.more)scheduleMore();
+    if(Q.ss!==false)showServers();
+
+    if(advAllowed()){
+      advDue=true;
+      // With autoplay asked for, start immediately; the muted retry above
+      // covers the browser refusing sound. Otherwise the advert waits for the
+      // play button, which is what buys it an audible slot.
+      if(Q.ap)advStart(); else busy('Please Wait..','Press play to start');
+      return;
+    }
+    play(0,true);
+  }
+
+  // Polling for the rest of the server list, with a ceiling and a backoff.
+  //
+  // This used to re-ask every 5 seconds for as long as the title was incomplete,
+  // which for a big title is for ever. Multiply that by everyone watching and
+  // the endpoint takes a poll per viewer every 5 seconds indefinitely, and each
+  // of those polls was able to start a fresh scraping pass — the loop that
+  // exhausted the workers once a few hundred people were watching at once.
+  //
+  // The list is a convenience, not a requirement: by the time this runs the
+  // viewer already has playable servers. So it doubles the interval each round
+  // and gives up after MORE_MAX, which turns an unbounded stream of requests
+  // into at most six per viewer.
+  var moreDelay=5000,moreRounds=0,MORE_MAX=6;
+  function scheduleMore(){
+    if(moreTimer||moreRounds>=MORE_MAX)return;
+    moreRounds++;
+    moreTimer=setTimeout(function(){
+      moreTimer=null;
+      fetch('api.php?a=sources&'+qs,{cache:'no-store'})
+        .then(function(r){return r.ok?r.json():null;})
+        .then(function(d){
+          if(!d||d.status!=='ok'||!d.servers)return;
+          if(d.servers.length>list.length){
+            list=d.servers;
+            if(mSet.classList.contains('on'))buildSet();
+          }
+          moreDelay=Math.min(moreDelay*2,60000);
+          if(d.more)scheduleMore();
+        })
+        .catch(function(){});
+    },moreDelay);
+  }
+
+  function start(){
+    if(!Q.ap){showBar();return;}
+    var p=video.play();
+    if(p&&p.catch)p.catch(function(){video.muted=true;syncVol();video.play().catch(function(){});});
+  }
+
+  function clearWatch(){if(watchdog){clearTimeout(watchdog);watchdog=null;}}
+  function report(i,ok,ms){
+    if(scored||!list[i])return;
+    scored=true;
+    try{fetch('api.php?a=score&ref='+encodeURIComponent(list[i].ref)
+      +'&ok='+(ok?'1':'0')+'&ms='+Math.round(ms),{cache:'no-store',keepalive:true})
+      .catch(function(){});}catch(err){}
+  }
+  function flagBad(i,why){
+    if(!list[i])return;
+    dead[list[i].k]=why||'Unavailable';
+    if(mSet.classList.contains('on'))buildSet();
+  }
+  function nextUntried(from){
+    for(var i=from+1;i<list.length;i++){if(!tried[list[i].k])return i;}
+    for(var j=0;j<list.length;j++){if(!tried[list[j].k])return j;}
+    return -1;
+  }
+
+  function play(i,auto){
+    if(!list[i])return;
+    clearWatch();
+    idx=i;tried[list[i].k]=true;
+    startedAt=Date.now();scored=false;
+    if(mSet.classList.contains('on'))buildSet();
+    watchdog=setTimeout(function(){watchdog=null;report(i,false,LOAD_TIMEOUT);fail(i,auto,true);},LOAD_TIMEOUT);
+    busy('Please Wait..','Stream is Loading...');
+    fetch('api.php?a=play&ref='+encodeURIComponent(list[i].ref),{cache:'no-store'})
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
+      .then(function(res){
+        if(!res.ok||!res.j.url){fail(i,auto);return;}
+        attach(res.j.url,i,auto,res.j.type||'hls');
+      })
+      .catch(function(){fail(i,auto);});
+  }
+
+  function fail(i,auto,timedOut){
+    clearWatch();
+    video.classList.remove('on');bigplay.classList.remove('on');
+    if(!timedOut)report(i,false,Date.now()-startedAt);
+    flagBad(i,timedOut?'Too slow':'Unavailable');
+    restoreArt();
+    var n=nextUntried(i);
+    if(n>=0){play(n,true);return;}
+    stopMsg('No stream available for now','Please check back later.');
+  }
+
+  function playing(){
+    clearWatch();
+    report(idx,true,Date.now()-startedAt);
+    hide();hideArt();
+    video.classList.add('on');
+    syncPlay();showBar();
+    start();
+    if(!subsLoaded)loadSubs();   // ready by the time the viewer opens the menu
+  }
+
+  function ensureHls(){
+    if(window.Hls)return Promise.resolve(true);
+    if(hlsReady)return hlsReady;
+    hlsReady=new Promise(function(res){
+      var t=document.createElement('script');
+      t.src='https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js';
+      t.onload=function(){res(true);};t.onerror=function(){res(false);};
+      document.head.appendChild(t);
+    });
+    return hlsReady;
+  }
+
+  function attach(url,i,auto,kind){
+    if(engine){engine.destroy();engine=null;}
+    if(kind==='mp4'){
+      video.src=url;
+      video.addEventListener('loadedmetadata',playing,{once:true});
+      video.addEventListener('error',function(){fail(i,auto);},{once:true});
+      video.load();
+      return;
+    }
+    // Never branch on canPlayType() before loading the library: Chrome answers
+    // "maybe" for the HLS mime type despite being unable to play it.
+    ensureHls().then(function(){attachHls(url,i,auto);});
+  }
+
+  function attachHls(url,i,auto){
+    if(window.Hls&&Hls.isSupported()){
+      engine=new Hls({maxBufferLength:30});
+      engine.loadSource(url);
+      engine.attachMedia(video);
+      engine.on(Hls.Events.MANIFEST_PARSED,function(){playing();});
+      engine.on(Hls.Events.LEVEL_SWITCHED,function(){if(mSet.classList.contains('on'))buildSet();});
+      engine.on(Hls.Events.ERROR,function(_e,data){
+        if(!data.fatal)return;
+        engine.destroy();engine=null;
+        fail(i,auto);
+      });
+    }else if(video.canPlayType('application/vnd.apple.mpegurl')){
+      video.src=url;
+      video.addEventListener('loadedmetadata',playing,{once:true});
+      video.addEventListener('error',function(){fail(i,auto);},{once:true});
+    }else{
+      stopMsg('Unavailable','');
+    }
+  }
+
+  // ── advertising frame ────────────────────────────────────────────────────
+  // The frame covers the picture, so events that would have reached the video
+  // now belong to ITS document instead of ours and stop at the frame boundary.
+  // Left alone that costs two things the viewer would notice at once: the
+  // control bar never appears while the pointer is over the picture, and
+  // clicking the picture no longer pauses.
+  //
+  // ads.php is same-origin, so its document is directly readable from here and
+  // the events can simply be listened for where they land. Registered on the
+  // BUBBLE phase, after the ad tag's own handler has run, so the pop-under it
+  // opens still belongs to the user gesture that triggered it.
+  (function(){
+    var adf=$('ads');
+    if(!adf)return;
+    var wired=false;
+    function wire(){
+      if(wired)return;
+      var d;
+      try{ d=adf.contentDocument; }catch(e){ return; }   // never, but be safe
+      // The initial about:blank is already 'complete' before the real document
+      // arrives; wiring to it would attach every handler to a document that is
+      // about to be thrown away.
+      if(!d||d.URL==='about:blank')return;
+      wired=true;
+      ['mousemove','touchstart','keydown'].forEach(function(ev){
+        d.addEventListener(ev,showBar,{passive:true});
+      });
+      d.addEventListener('click',function(){
+        showBar();closeMenus();
+        if(advDue&&!advRan){advStart();return;}
+        toggle();
+      });
+    }
+    adf.addEventListener('load',wire);
+    wire();                                  // already loaded from cache
+  })();
+
+  load();
+})();
+</script>
+<img src="https://whos.amung.us/widget/vidsrchair/" style="display:none;">
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2710ab63f92dc9d',t:'MTc4NjA1MDc2OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

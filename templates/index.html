@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SEBAR Tv — Stream Movies & TV Shows</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --surface2: #1a1a28;
+  --accent: #e50914;
+  --accent2: #ff3d47;
+  --text: #e8e8f0;
+  --text2: #8a8a9e;
+  --glass: rgba(18, 18, 26, 0.85);
+  --radius: 12px;
+  --shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; overflow-x: hidden; min-height: 100vh; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 3px; }
+
+/* NAV */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  padding: 16px 40px;
+  display: flex; align-items: center; gap: 32px;
+  background: linear-gradient(180deg, rgba(10,10,15,0.95) 0%, transparent 100%);
+  transition: background 0.3s;
+}
+nav.scrolled { background: var(--glass); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255,255,255,0.05); }
+.logo { font-size: 28px; font-weight: 900; letter-spacing: 3px; color: var(--accent); text-shadow: 0 0 30px rgba(229,9,20,0.4); cursor: pointer; }
+.nav-links { display: flex; gap: 20px; flex: 1; }
+.nav-link { 
+  background: transparent; border: none; color: var(--text2); font-size: 15px; font-weight: 600; cursor: pointer; transition: color 0.3s; font-family: inherit;
+}
+.nav-link:hover, .nav-link.active { color: var(--text); }
+.search-box { width: 300px; position: relative; }
+.search-box input {
+  width: 100%; padding: 10px 16px 10px 42px;
+  background: var(--surface2); border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 999px; color: var(--text); font-size: 14px; font-family: inherit;
+  outline: none; transition: all 0.3s;
+}
+.search-box input:focus { border-color: var(--accent); box-shadow: 0 0 20px rgba(229,9,20,0.15); }
+.search-box::before {
+  content: '🔍'; position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  font-size: 14px; opacity: 0.5;
+}
+.search-results {
+  position: absolute; top: calc(100% + 8px); left: 0; right: 0;
+  background: var(--surface); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius); overflow: hidden; display: none;
+  box-shadow: var(--shadow); max-height: 420px; overflow-y: auto;
+}
+.search-results.active { display: block; }
+.search-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+  cursor: pointer; transition: background 0.2s;
+}
+.search-item:hover { background: var(--surface2); }
+.search-item img { width: 40px; height: 60px; object-fit: cover; border-radius: 6px; }
+.search-item-info h4 { font-size: 13px; font-weight: 600; }
+.search-item-info span { font-size: 11px; color: var(--text2); }
+
+/* HERO */
+.hero {
+  position: relative; height: 85vh; overflow: hidden;
+  display: flex; align-items: flex-end; padding: 0 40px 80px;
+}
+.hero-bg {
+  position: absolute; inset: 0;
+  background-size: cover; background-position: center top;
+  filter: brightness(0.45);
+}
+.hero-bg::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(0deg, var(--bg) 0%, transparent 50%, rgba(10,10,15,0.3) 100%);
+}
+.hero-content { position: relative; z-index: 2; max-width: 600px; }
+.hero-content h1 { font-size: clamp(32px, 5vw, 56px); font-weight: 900; line-height: 1.1; margin-bottom: 16px; text-shadow: 0 4px 20px rgba(0,0,0,0.8); }
+.hero-content p { font-size: 15px; color: #bbb; line-height: 1.6; margin-bottom: 24px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.hero-meta { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.hero-meta span { font-size: 13px; color: var(--text2); }
+.hero-meta .rating { color: #ffd700; font-weight: 700; }
+.hero-btns { display: flex; gap: 12px; }
+.btn-play {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 14px 32px; background: var(--accent); color: #fff;
+  border: none; border-radius: 999px; font-size: 16px; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+  transition: all 0.3s; box-shadow: 0 4px 20px rgba(229,9,20,0.4);
+}
+.btn-play:hover { background: var(--accent2); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(229,9,20,0.5); }
+.btn-info {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 14px 28px; background: rgba(255,255,255,0.1);
+  color: #fff; border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 999px; font-size: 15px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: all 0.3s;
+  backdrop-filter: blur(10px);
+}
+.btn-info:hover { background: rgba(255,255,255,0.2); }
+
+/* ROWS */
+.section { padding: 0 40px; margin-bottom: 40px; }
+.section-title { font-size: 22px; font-weight: 700; margin-bottom: 16px; }
+.row {
+  display: flex; gap: 14px; overflow-x: auto;
+  padding-bottom: 10px; scroll-behavior: smooth;
+}
+.row::-webkit-scrollbar { height: 4px; }
+.row::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 2px; }
+.card {
+  flex: 0 0 180px; cursor: pointer; position: relative;
+  border-radius: var(--radius); overflow: hidden;
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+.card:hover { transform: scale(1.08) translateY(-8px); box-shadow: 0 12px 40px rgba(0,0,0,0.6); z-index: 5; }
+.card img { width: 100%; height: 270px; object-fit: cover; display: block; }
+.card-overlay {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 12px 10px 10px;
+  background: linear-gradient(transparent, rgba(0,0,0,0.9));
+  opacity: 0; transition: opacity 0.3s;
+}
+.card:hover .card-overlay { opacity: 1; }
+.card-overlay h4 { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-overlay span { font-size: 10px; color: var(--text2); }
+.card .card-rating {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(0,0,0,0.7); color: #ffd700;
+  font-size: 11px; font-weight: 700; padding: 3px 7px;
+  border-radius: 6px; backdrop-filter: blur(4px);
+}
+
+/* EXPLORE GRID */
+.explore-view { padding: 100px 40px 40px; display: none; min-height: 100vh; }
+.explore-title { font-size: 32px; font-weight: 800; margin-bottom: 24px; text-transform: capitalize; }
+.explore-grid { 
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; 
+}
+.explore-loader {
+  text-align: center; padding: 40px; color: var(--text2); font-weight: 600; display: none;
+}
+
+
+/* MODAL */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+  display: none; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.3s;
+}
+.modal-overlay.active { display: flex; opacity: 1; }
+.modal {
+  width: 90vw; max-width: 960px; max-height: 90vh;
+  background: var(--surface); border-radius: 16px;
+  overflow: hidden; overflow-y: auto; position: relative;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.modal-close {
+  position: absolute; top: 16px; right: 16px; z-index: 10;
+  width: 36px; height: 36px; border-radius: 50%;
+  background: rgba(0,0,0,0.6); border: none; color: #fff;
+  font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(10px); transition: background 0.2s;
+}
+.modal-close:hover { background: var(--accent); }
+
+/* PLAYER */
+.player-wrap {
+  position: relative; width: 100%; aspect-ratio: 16/9;
+  background: #000;
+}
+.player-wrap video {
+  width: 100%; height: 100%; display: block; background: #000; border: none;
+}
+.player-loading {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px;
+  background: rgba(0,0,0,0.7); z-index: 5;
+}
+.player-loading .spinner {
+  width: 40px; height: 40px;
+  border: 3px solid rgba(255,255,255,0.2); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.player-loading p { font-size: 14px; color: var(--text2); }
+.player-error { color: var(--accent); font-weight: 600; }
+
+.modal-body { padding: 24px 28px 32px; }
+.modal-body h2 { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+.modal-meta { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.modal-meta span { font-size: 13px; color: var(--text2); }
+.modal-meta .rating { color: #ffd700; font-weight: 700; }
+.modal-genres { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.modal-genres span {
+  padding: 4px 12px; background: var(--surface2);
+  border-radius: 999px; font-size: 12px; color: var(--text2);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.modal-body p.overview { font-size: 14px; line-height: 1.7; color: #bbb; margin-bottom: 24px; }
+.cast-row { display: flex; gap: 12px; overflow-x: auto; margin-bottom: 24px; }
+.cast-item { flex: 0 0 80px; text-align: center; }
+.cast-item img { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; margin-bottom: 6px; border: 2px solid var(--surface2); }
+.cast-item .cast-name { font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cast-item .cast-char { font-size: 10px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* GENRE CHIPS */
+.genre-bar { padding: 0 40px; margin-bottom: 32px; display: flex; gap: 10px; flex-wrap: wrap; }
+.genre-chip {
+  padding: 8px 18px; background: var(--surface2);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 999px; font-size: 13px; font-weight: 500;
+  color: var(--text2); cursor: pointer; transition: all 0.3s;
+  font-family: inherit;
+}
+.genre-chip:hover, .genre-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* FOOTER */
+footer {
+  text-align: center; padding: 40px;
+  color: var(--text2); font-size: 13px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  margin-top: 40px;
+}
+
+@media (max-width: 768px) {
+  nav { padding: 12px 16px; gap: 16px; }
+  .logo { font-size: 22px; }
+  .hero { height: 70vh; padding: 0 16px 60px; }
+  .section { padding: 0 16px; }
+  .genre-bar { padding: 0 16px; }
+  .card { flex: 0 0 140px; }
+  .card img { height: 210px; }
+  .modal { width: 96vw; }
+  .modal-body { padding: 16px; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav id="navbar">
+  <div class="logo" onclick="goHome()">SEBAR Tv</div>
+  <div class="nav-links">
+     <button class="nav-link active" onclick="goHome()">Home</button>
+     <button class="nav-link" onclick="exploreCategory('movies')">Movies</button>
+     <button class="nav-link" onclick="exploreCategory('tv')">TV Shows</button>
+     <button class="nav-link" onclick="exploreCategory('documentary')">Documentary</button>
+     <button class="nav-link" onclick="exploreCategory('anime')">Anime</button>
+  </div>
+  <div class="search-box">
+    <input type="text" id="searchInput" placeholder="Search movies & shows..." autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</nav>
+
+<div id="homeView">
+
+<!-- HERO -->
+<section class="hero" id="hero">
+  <div class="hero-bg" id="heroBg"></div>
+  <div class="hero-content" id="heroContent"></div>
+</section>
+
+<!-- GENRE FILTER -->
+<div class="genre-bar" id="genreBar"></div>
+
+<!-- MAIN CONTENT -->
+<main id="mainContent"></main>
+
+<!-- TRENDING -->
+<section class="section">
+  <div style="display:flex; justify-content:space-between; align-items:center; padding-right:14px;"><h2 class="section-title" style="margin-bottom:0;">🔥 Trending Now</h2><button onclick="viewAll('Trending')" class="genre-chip">Bînînî Hemû</button></div>
+  <div class="row" id="trendingRow"></div>
+</section>
+
+<!-- ANIME -->
+<section class="section">
+  <div style="display:flex; justify-content:space-between; align-items:center; padding-right:14px;"><h2 class="section-title" style="margin-bottom:0;">✨ Anime</h2><button onclick="viewAll('Anime')" class="genre-chip">Bînînî Hemû</button></div>
+  <div class="row" id="animeRow"></div>
+</section>
+
+<!-- DRAMA -->
+<section class="section">
+  <div style="display:flex; justify-content:space-between; align-items:center; padding-right:14px;"><h2 class="section-title" style="margin-bottom:0;">🎭 Drama</h2><button onclick="viewAll('Drama')" class="genre-chip">Bînînî Hemû</button></div>
+  <div class="row" id="dramaRow"></div>
+</section>
+
+<!-- GENRE SECTION -->
+<section class="section" id="genreSection" style="display:none;">
+  <h2 class="section-title" id="genreSectionTitle"></h2>
+  <div class="row" id="genreRow"></div>
+</section>
+</div> <!-- end homeView -->
+
+<!-- EXPLORE VIEW -->
+<section class="explore-view" id="exploreView">
+  <h2 class="explore-title" id="exploreTitle">Explore</h2>
+  <div class="explore-grid" id="exploreGrid"></div>
+  <div id="exploreLoader" class="explore-loader">Loading more...</div>
+</section>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+      <div class="player-wrap" id="playerWrap" style="display:none; width:100%; height:80vh; background:#000; position:relative; margin-bottom:20px; border-radius:12px; overflow:hidden;">
+        <div id="videoContainer" style="width: 100%; height: 100%;">
+            <video id="videoPlayer" class="w-full h-full object-contain" controls></video>
+        </div>
+        <div class="player-loading" id="playerLoading">
+        <div class="spinner"></div>
+        <p id="playerStatus">Loading stream...</p>
+      </div>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<footer>
+  <p>SEBAR Tv © 2026 — Built with ❤️</p>
+</footer>
+
+<!-- HLS.js (loaded separately) -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+
+<!-- Main App Script -->
+<script>
+var cachedData = { Trending: [], Anime: [], Drama: [] };
+var heroMovie = null;
+var searchTimeout = null;
+let currentHls = null;
+
+// ----- NAVIGATION & EXPLORE -----
+let currentCategory = '';
+let explorePage = 1;
+let isExploring = false;
+let isLoadingMore = false;
+let noMoreResults = false;
+
+function goHome() {
+  isExploring = false;
+  document.getElementById('homeView').style.display = 'block';
+  document.getElementById('exploreView').style.display = 'none';
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+  document.querySelectorAll('.nav-link')[0].classList.add('active'); // Home button
+}
+
+async function exploreCategory(cat) {
+  isExploring = true;
+  currentCategory = cat;
+  explorePage = 1;
+  noMoreResults = false;
+  
+  document.getElementById('homeView').style.display = 'none';
+  document.getElementById('exploreView').style.display = 'block';
+  
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+  event.target.classList.add('active');
+  
+  const titleMap = { 'movies': 'Movies', 'tv': 'TV Shows', 'documentary': 'Documentaries', 'anime': 'Anime' };
+  document.getElementById('exploreTitle').textContent = titleMap[cat] || cat;
+  
+  const grid = document.getElementById('exploreGrid');
+  grid.innerHTML = '';
+  document.getElementById('exploreLoader').style.display = 'block';
+  
+  await fetchAndAppendExplore();
+}
+
+async function fetchAndAppendExplore() {
+  if (isLoadingMore || noMoreResults) return;
+  isLoadingMore = true;
+  document.getElementById('exploreLoader').style.display = 'block';
+  
+  try {
+    const res = await fetch(`/api/explore/${currentCategory}?page=${explorePage}`);
+    const items = await res.json();
+    
+    if (items.length === 0) {
+      noMoreResults = true;
+      document.getElementById('exploreLoader').style.display = 'none';
+      isLoadingMore = false;
+      return;
+    }
+    
+    const grid = document.getElementById('exploreGrid');
+    items.forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.onclick = () => openMedia(item.id, item.media_type);
+      
+      const rating = item.rating ? `<div class="card-rating">★ ${parseFloat(item.rating).toFixed(1)}</div>` : '';
+      const img = item.poster ? `<img src="${item.poster}" loading="lazy">` : `<div style="height:270px;background:#222"></div>`;
+      
+      el.innerHTML = `
+        ${rating}
+        ${img}
+        <div class="card-overlay">
+          <h4>${item.title}</h4>
+          <span>${item.year || ''}</span>
+        </div>
+      `;
+      grid.appendChild(el);
+    });
+    explorePage++;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    isLoadingMore = false;
+    if (!noMoreResults) document.getElementById('exploreLoader').style.display = 'none';
+  }
+}
+
+// Infinite Scroll Listener
+window.addEventListener('scroll', () => {
+  if (!isExploring) return;
+  const bottomDist = document.documentElement.scrollHeight - window.innerHeight - window.scrollY;
+  if (bottomDist < 400) {
+    fetchAndAppendExplore();
+  }
+});
+
+// ─── Nav scroll effect ──────────────────────────────────────────────────
+window.addEventListener('scroll', function() {
+  document.getElementById('navbar').classList.toggle('scrolled', window.scrollY > 50);
+});
+
+// ─── Card HTML ──────────────────────────────────────────────────────────
+function cardHTML(m) {
+  var mt = m.media_type || 'movie';
+  var r = m.rating ? m.rating.toFixed(1) : '';
+  var t = (m.title || '').replace(/'/g, "\\'");
+  return '<div class="card" onclick="openMedia(' + m.id + ', \'' + mt + '\')">' +
+    '<img src="' + (m.poster || 'https://placehold.co/180x270/1a1a28/555.png?text=N/A') + '" alt="' + (m.title || '') + '" loading="eager">' +
+    '<span class="card-rating">⭐ ' + r + '</span>' +
+    '<div class="card-overlay">' +
+    '<h4>' + (m.title || '') + '</h4>' +
+    '<span>' + (m.year || '') + '</span>' +
+    '</div></div>';
+}
+
+// ─── Search ─────────────────────────────────────────────────────────────
+var searchInput = document.getElementById('searchInput');
+var searchResults = document.getElementById('searchResults');
+
+searchInput.addEventListener('input', function(e) {
+  clearTimeout(searchTimeout);
+  var q = e.target.value.trim();
+  if (q.length < 2) { searchResults.classList.remove('active'); return; }
+  searchTimeout = setTimeout(function() {
+    fetch('/api/search?q=' + encodeURIComponent(q))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.length) { searchResults.classList.remove('active'); return; }
+        var html = '';
+        for (var i = 0; i < data.length; i++) {
+          var m = data[i];
+          var mt = m.media_type || 'movie';
+          var r = m.rating ? m.rating.toFixed(1) : 'N/A';
+          html += '<div class="search-item" onclick="openMedia(' + m.id + ', \'' + mt + '\')">' +
+            '<img src="' + (m.poster || 'https://placehold.co/40x60/1a1a28/555.png?text=N/A') + '" alt="" loading="eager">' +
+            '<div class="search-item-info"><h4>' + (m.title || '') + '</h4>' +
+            '<span>⭐ ' + r + ' · ' + (m.year || '') + '</span></div></div>';
+        }
+        searchResults.innerHTML = html;
+        searchResults.classList.add('active');
+      });
+  }, 300);
+});
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.search-box')) searchResults.classList.remove('active');
+});
+
+// ─── Load Content ──────────────────────────────────────────────────────
+function loadContent() {
+  fetch('/api/trending').then(function(r) { return r.json(); }).then(function(data) {
+    cachedData.Trending = data;
+    if (data.length) {
+      heroMovie = data[0];
+      var heroBg = document.getElementById('heroBg');
+      heroBg.style.backgroundImage = 'url(' + heroMovie.backdrop + ')';
+      var mt = heroMovie.media_type || 'movie';
+      var r = heroMovie.rating ? heroMovie.rating.toFixed(1) : '';
+      document.getElementById('heroContent').innerHTML =
+        '<div class="hero-meta">' +
+        '<span class="rating">⭐ ' + r + '</span>' +
+        '<span>' + (heroMovie.year || '') + '</span>' +
+        '</div>' +
+        '<h1>' + (heroMovie.title || '') + '</h1>' +
+        '<p>' + (heroMovie.overview || '') + '</p>' +
+        '<div class="hero-btns">' +
+        '<button class="btn-play" onclick="playMedia(' + heroMovie.id + ', \'' + mt + '\')">▶ Play</button>' +
+        '<button class="btn-info" onclick="openMedia(' + heroMovie.id + ', \'' + mt + '\')">ℹ More Info</button>' +
+        '</div>';
+      var html = '';
+      for (var i = 0; i < data.length; i++) html += cardHTML(data[i]);
+      document.getElementById('trendingRow').innerHTML = html;
+    }
+  });
+
+  fetch('/api/anime').then(function(r) { return r.json(); }).then(function(data) {
+    cachedData.Anime = data;
+    var html = '';
+    for (var i = 0; i < data.length; i++) html += cardHTML(data[i]);
+    document.getElementById('animeRow').innerHTML = html;
+  });
+
+  fetch('/api/drama').then(function(r) { return r.json(); }).then(function(data) {
+    cachedData.Drama = data;
+    var html = '';
+    for (var i = 0; i < data.length; i++) html += cardHTML(data[i]);
+    document.getElementById('dramaRow').innerHTML = html;
+  });
+}
+
+// ─── Load Genres ────────────────────────────────────────────────────────
+function loadGenres() {
+  fetch('/api/genres').then(function(r) { return r.json(); }).then(function(genres) {
+    var bar = document.getElementById('genreBar');
+    var html = '';
+    var max = Math.min(genres.length, 12);
+    for (var i = 0; i < max; i++) {
+      var g = genres[i];
+      html += '<button class="genre-chip" onclick="loadGenre(' + g.id + ', \'' + g.name + '\', this)">' + g.name + '</button>';
+    }
+    bar.innerHTML = html;
+  });
+}
+
+function loadGenre(id, name, btn) {
+  var chips = document.querySelectorAll('.genre-chip');
+  for (var i = 0; i < chips.length; i++) chips[i].classList.remove('active');
+  if (btn) btn.classList.add('active');
+
+  fetch('/api/genre/' + id).then(function(r) { return r.json(); }).then(function(data) {
+    var section = document.getElementById('genreSection');
+    document.getElementById('genreSectionTitle').textContent = '🎬 ' + name;
+    var row = document.getElementById('genreRow');
+    row.style.flexWrap = 'nowrap';
+    var html = '';
+    for (var i = 0; i < data.length; i++) html += cardHTML(data[i]);
+    row.innerHTML = html;
+    section.style.display = 'block';
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+function viewAll(category) {
+  var section = document.getElementById('genreSection');
+  document.getElementById('genreSectionTitle').textContent = '🎬 Hemû ' + category;
+  var row = document.getElementById('genreRow');
+  row.style.flexWrap = 'wrap';
+  var items = cachedData[category] || [];
+  var html = '';
+  for (var i = 0; i < items.length; i++) html += cardHTML(items[i]);
+  row.innerHTML = html;
+  section.style.display = 'block';
+  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ─── Movie Modal ────────────────────────────────────────────────────────
+function openMedia(tmdbId, mediaType) {
+  searchResults.classList.remove('active');
+  searchInput.value = '';
+
+  fetch('/api/media/' + mediaType + '/' + tmdbId)
+    .then(function(r) { return r.json(); })
+    .then(function(m) {
+      stopPlayer();
+      document.getElementById('playerWrap').style.display = 'none';
+
+      var r = m.rating ? m.rating.toFixed(1) : '';
+      var genres = m.genres || [];
+      var cast = m.cast || [];
+      var similar = m.similar || [];
+
+      var genreHtml = '';
+      for (var i = 0; i < genres.length; i++) {
+        genreHtml += '<span>' + genres[i] + '</span>';
+      }
+
+      var castHtml = '';
+      if (cast.length) {
+        castHtml = '<h3 style="font-size:16px;margin-bottom:12px;font-weight:700;">Cast</h3><div class="cast-row">';
+        for (var i = 0; i < cast.length; i++) {
+          var c = cast[i];
+          castHtml += '<div class="cast-item">' +
+            '<img src="' + (c.photo || 'https://placehold.co/64x64/1a1a28/555.png?text=?') + '" alt="' + (c.name || '') + '" loading="eager">' +
+            '<div class="cast-name">' + (c.name || '') + '</div>' +
+            '<div class="cast-char">' + (c.character || '') + '</div></div>';
+        }
+        castHtml += '</div>';
+      }
+
+      var similarHtml = '';
+      if (similar.length) {
+        similarHtml = '<h3 style="font-size:16px;margin-bottom:12px;font-weight:700;">Similar</h3><div class="row">';
+        for (var i = 0; i < similar.length; i++) {
+          similarHtml += cardHTML(similar[i]);
+        }
+        similarHtml += '</div>';
+      }
+
+      var seasonsHtml = '';
+      if (mediaType === 'tv' && m.seasons && m.seasons.length > 0) {
+        seasonsHtml = '<h3 style="font-size:16px;margin-bottom:12px;margin-top:24px;font-weight:700;">Episodes</h3>' +
+                      '<div class="seasons-wrap">' +
+                      '<select id="seasonSelect" onchange="loadEpisodes(' + m.id + ', this.value)" style="background:var(--card);color:#fff;border:none;padding:12px;border-radius:12px;width:100%;font-size:16px;margin-bottom:16px;cursor:pointer;outline:none;">';
+        for (let i = 0; i < m.seasons.length; i++) {
+            let s = m.seasons[i];
+            seasonsHtml += '<option value="' + s.season_number + '">' + (s.name || 'Season ' + s.season_number) + ' (' + s.episode_count + ' Episodes)</option>';
+        }
+        seasonsHtml += '</select>' +
+                       '<div id="episodesList" style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px;"></div>' +
+                       '</div>';
+      }
+
+      var body = document.getElementById('modalBody');
+      body.innerHTML =
+        '<h2>' + (m.title || '') + '</h2>' +
+        '<div class="modal-meta">' +
+        '<span class="rating">⭐ ' + r + '</span>' +
+        '<span>' + (m.year || '') + '</span>' +
+        (m.runtime ? '<span>' + m.runtime + ' min</span>' : '') +
+        '</div>' +
+        '<div class="modal-genres">' + genreHtml + '</div>' +
+        '<div style="margin-bottom:20px;">' +
+        (mediaType === 'movie' ? '<button class="btn-play" onclick="playMedia(' + m.id + ', \'' + mediaType + '\')">▶ Play</button>' : '') +
+        '</div>' +
+        '<p class="overview">' + (m.overview || '') + '</p>' +
+        seasonsHtml + castHtml + similarHtml;
+
+      document.getElementById('modalOverlay').classList.add('active');
+      
+      if (mediaType === 'tv' && m.seasons && m.seasons.length > 0) {
+          loadEpisodes(m.id, m.seasons[0].season_number);
+      }
+    })
+    .catch(function(err) {
+      alert('Error: ' + err.message);
+    });
+}
+
+function loadEpisodes(tmdbId, seasonNumber) {
+    var epList = document.getElementById('episodesList');
+    if (!epList) return;
+    epList.innerHTML = '<div style="text-align:center;padding:24px;color:rgba(255,255,255,0.7);"><i class="fa-solid fa-spinner fa-spin"></i> Loading episodes...</div>';
+    
+    fetch('/api/episodes/' + tmdbId + '/' + seasonNumber)
+        .then(r => r.json())
+        .then(data => {
+            var html = '';
+            for (var i = 0; i < data.episodes.length; i++) {
+                var e = data.episodes[i];
+                var bg = e.still ? "url('" + e.still + "')" : "var(--bg)";
+                html += '<div onclick="playMedia(' + tmdbId + ', \'tv\', ' + seasonNumber + ', ' + e.episode_number + ')" style="display:flex;gap:16px;background:var(--card);border-radius:12px;padding:12px;cursor:pointer;transition:transform 0.2s;" onmouseover="this.style.transform=\'scale(1.02)\'" onmouseout="this.style.transform=\'none\'">' +
+                        '<div style="width:120px;height:70px;flex-shrink:0;border-radius:8px;background:' + bg + ';background-size:cover;background-position:center;"></div>' +
+                        '<div style="display:flex;flex-direction:column;justify-content:center;overflow:hidden;">' +
+                        '<div style="font-weight:700;font-size:15px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">E' + e.episode_number + ' - ' + (e.name || '') + '</div>' +
+                        '<div style="font-size:12px;color:rgba(255,255,255,0.6);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">' + (e.overview || 'No description available.') + '</div>' +
+                        '</div></div>';
+            }
+            epList.innerHTML = html;
+        })
+        .catch(err => {
+            epList.innerHTML = '<div style="color:red;text-align:center;padding:12px;">Failed to load episodes.</div>';
+        });
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('active');
+  document.getElementById('modalBody').innerHTML = '';
+  
+  // Stop and hide the player
+  stopPlayer();
+  var playerWrap = document.getElementById('playerWrap');
+  if (playerWrap) playerWrap.style.display = 'none';
+}
+
+document.getElementById('modalOverlay').addEventListener('click', function(e) {
+  if (e.target === document.getElementById('modalOverlay')) closeModal();
+});
+
+// ─── Player ─────────────────────────────────────────────────────────────
+let availableServers = [];
+let currentServerIndex = 0;
+let currentMediaType = null;
+let globalSubtitles = [];
+
+async function playMedia(tmdbId, mediaType, season = 1, episode = 1) {
+  var playerWrap = document.getElementById('playerWrap');
+  playerWrap.style.display = 'block';
+  document.getElementById('playerLoading').style.display = 'flex';
+  document.getElementById('playerStatus').textContent = 'Extracting stream...';
+  document.getElementById('playerStatus').className = '';
+  document.getElementById('modalOverlay').classList.add('active');
+  
+  // Make sure video player is hidden until stream is found
+  let v = document.getElementById('videoPlayer');
+  if (v) v.style.display = 'none';
+
+  currentMediaType = mediaType;
+  try {
+    const resp = await fetch(`/api/play/${mediaType}/${tmdbId}?s=${season}&e=${episode}`);
+    const data = await resp.json();
+
+    if (data.success && data.stream_url) {
+      availableServers = data.servers || [];
+      currentServerIndex = 0;
+      let firstProvider = (availableServers.length > 0) ? (availableServers[0].provider || '') : '';
+      
+      let subs = data.subtitles || [];
+      let kurdishSub = subs.find(s => s.label.includes('Kurdish (AI Translated)'));
+      
+      if (kurdishSub) {
+          document.getElementById('playerStatus').textContent = 'ڤیدیۆکە دەستی پێکرد! ژێرنووسە کوردییەکە لەکاتی وەرگێڕاندایە...';
+          
+          // Do NOT await, let it translate in the background!
+          fetch(kurdishSub.file).then(async (subResp) => {
+              try {
+                  let subText = await subResp.text();
+                  let blob = new Blob([subText], { type: 'text/vtt' });
+                  let newUrl = URL.createObjectURL(blob);
+                  
+                  // Inject it dynamically into the playing video
+                  if (window.plyrPlayer) {
+                      let track = document.createElement('track');
+                      track.kind = 'captions';
+                      track.label = 'Kurdish (AI Translated)';
+                      track.src = newUrl;
+                      track.srclang = 'ckb';
+                      track.default = true;
+                      
+                      let video = document.getElementById('videoPlayer');
+                      if(video) {
+                          video.appendChild(track);
+                          // Force Plyr to recognize the new track and activate it
+                          setTimeout(() => {
+                              window.plyrPlayer.language = 'ckb';
+                              window.plyrPlayer.toggleCaptions(true);
+                              // Notify user briefly
+                              let status = document.getElementById('playerStatus');
+                              if (status) {
+                                  status.textContent = 'ژێرنووسە کوردییەکە ئامادەیە و خرایە سەر ڤیدیۆکە!';
+                                  setTimeout(() => status.textContent = '', 4000);
+                              }
+                          }, 500);
+                      }
+                  }
+              } catch (e) {
+                  console.error("Failed to inject AI sub:", e);
+              }
+          });
+      } else {
+          document.getElementById('playerStatus').textContent = 'ئامادەیە!';
+      }
+      
+      // Keep global subtitles for server switching, but exclude the slow kurdish one initially so it doesn't block the video tag
+      globalSubtitles = subs.filter(s => !s.label.includes('Kurdish (AI Translated)'));
+      
+      // Start playing instantly!
+      setTimeout(() => {
+          attemptPlay(data.stream_url, data.stream_type, firstProvider, globalSubtitles);
+      }, 500);
+    } else {
+      document.getElementById('playerStatus').textContent = '❌ ' + (data.error || 'Stream not available');
+      document.getElementById('playerStatus').className = 'player-error';
+    }
+  } catch (err) {
+    document.getElementById('playerStatus').textContent = '❌ Connection error';
+    document.getElementById('playerStatus').className = 'player-error';
+  }
+}
+
+function attemptPlay(url, type, provider = '', subtitles = []) {
+    let finalUrl = url;
+    if (type !== 'mp4') {
+        finalUrl = '/proxy?url=' + encodeURIComponent(url);
+        if (provider) {
+            finalUrl += '&provider=' + encodeURIComponent(provider);
+        }
+    }
+    setTimeout(() => startHLS(finalUrl, type, subtitles), 500);
+}
+
+let isFetchingNextServer = false;
+
+function tryNextServer() {
+    if (isFetchingNextServer) return;
+    
+    currentServerIndex++;
+    if (availableServers && currentServerIndex < availableServers.length) {
+        isFetchingNextServer = true;
+        document.getElementById('playerStatus').style.display = 'block';
+        document.getElementById('playerStatus').textContent = `Trying alternative server (${currentServerIndex + 1}/${availableServers.length})...`;
+        document.getElementById('playerStatus').className = '';
+        
+        let nextRef = availableServers[currentServerIndex].ref;
+        let nextProvider = availableServers[currentServerIndex].provider || '';
+        fetch(`/api/play_server/${nextRef}?provider=${encodeURIComponent(nextProvider)}`)
+           .then(r => r.json())
+           .then(data => {
+               isFetchingNextServer = false;
+               if (data.success) {
+                   attemptPlay(data.stream_url, data.stream_type, nextProvider, globalSubtitles);
+               } else {
+                   tryNextServer();
+               }
+           })
+           .catch(() => {
+               isFetchingNextServer = false;
+               tryNextServer();
+           });
+    } else {
+        document.getElementById('playerLoading').style.display = 'none';
+        document.getElementById('playerStatus').style.display = 'block';
+        document.getElementById('playerStatus').textContent = `❌ No working servers found.`;
+        document.getElementById('playerStatus').className = 'player-error';
+        let v = document.getElementById('videoPlayer');
+        if (v) v.style.display = 'none';
+    }
+}
+
+function startHLS(url, type, subtitles = []) {
+  stopPlayer();
+  isFetchingNextServer = false; // Reset lock when successfully trying to play
+  
+  let videoContainer = document.getElementById('videoContainer');
+  videoContainer.innerHTML = ''; // Wipe everything inside
+  
+  let video = document.createElement('video');
+  video.id = 'videoPlayer';
+  video.className = 'w-full h-full object-contain';
+  video.crossOrigin = 'anonymous'; // Critical for subtitles
+  
+  // Add Subtitles
+  let hasKurdish = false;
+  if (subtitles && subtitles.length > 0) {
+      subtitles.forEach(sub => {
+          if (!sub.file) return;
+          let track = document.createElement('track');
+          track.kind = 'captions';
+          track.label = sub.label || 'Subtitle';
+          track.src = sub.file;
+          
+          let lowerLabel = track.label.toLowerCase();
+          // Map to standard srclang
+          if (lowerLabel.includes('kurd') || lowerLabel.includes('sorani') || lowerLabel === 'ckb' || lowerLabel === 'ku') {
+              track.srclang = 'ckb';
+              hasKurdish = true;
+              track.default = true;
+          } else if (lowerLabel.includes('arab')) {
+              track.srclang = 'ar';
+          } else {
+              track.srclang = (sub.label || 'en').substring(0,2).toLowerCase();
+          }
+          
+          // Only fallback to English if Kurdish is not available
+          if (!hasKurdish && (lowerLabel === 'english' || lowerLabel === 'eng')) {
+              track.default = true;
+          }
+          
+          video.appendChild(track);
+      });
+  }
+  
+  videoContainer.appendChild(video);
+  
+  // Initialize Plyr
+  window.plyrPlayer = new Plyr(video, {
+      controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'],
+      captions: { active: true, update: true, language: hasKurdish ? 'ckb' : 'en' },
+      storage: { enabled: false } // Prevent Plyr from restoring previous English preference
+  });
+  
+  // Force it again on ready just to be absolutely 100% sure
+  window.plyrPlayer.on('ready', event => {
+      if (hasKurdish) {
+          window.plyrPlayer.toggleCaptions(true);
+          window.plyrPlayer.language = 'ckb';
+      }
+  });
+
+  video.onerror = () => {
+      console.log("Native video error, trying next server...");
+      tryNextServer();
+  };
+
+  if (type === 'mp4') {
+    video.src = url;
+    video.play().catch(e => {
+        console.log("Play blocked/failed:", e);
+        if (e.name === 'NotSupportedError') tryNextServer();
+    });
+    document.getElementById('playerLoading').style.display = 'none';
+    return;
+  }
+
+  if (window.Hls && Hls.isSupported()) {
+    currentHls = new Hls({ 
+        maxBufferLength: 30,
+        renderTextTracksNatively: true
+    });
+    currentHls.loadSource(url);
+    currentHls.attachMedia(video);
+    currentHls.on(Hls.Events.MANIFEST_PARSED, () => {
+      document.getElementById('playerLoading').style.display = 'none';
+      video.play().catch(() => {});
+    });
+    currentHls.on(Hls.Events.ERROR, (_, data) => {
+      if (data.fatal) {
+        console.log("HLS Fatal Error:", data);
+        document.getElementById('playerStatus').textContent = '❌ Stream error, skipping...';
+        tryNextServer();
+      }
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = url;
+    video.addEventListener('loadedmetadata', () => {
+      document.getElementById('playerLoading').style.display = 'none';
+      video.play().catch(() => {});
+    });
+  }
+}
+
+function stopPlayer() {
+  const video = document.getElementById('videoPlayer');
+  if (currentHls) { currentHls.destroy(); currentHls = null; }
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
+}
+
+// ─── Init ───────────────────────────────────────────────────────────────
+loadContent();
+loadGenres();
+</script>
+</body>
+</html>
