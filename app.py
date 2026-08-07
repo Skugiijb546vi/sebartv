@@ -161,34 +161,42 @@ def index():
 
 @app.route('/api/play/<media_type>/<int:tmdb_id>')
 def play_media(media_type, tmdb_id):
-    imdb_id = get_imdb_id(tmdb_id, media_type)
-    if not imdb_id:
-        return jsonify({'error': 'IMDB ID not found'}), 404
+    try:
+        imdb_id = get_imdb_id(tmdb_id, media_type)
+        if not imdb_id:
+            return jsonify({'error': 'IMDB ID not found'}), 404
 
-    season = request.args.get('s', 1, type=int)
-    episode = request.args.get('e', 1, type=int)
+        season = request.args.get('s', 1, type=int)
+        episode = request.args.get('e', 1, type=int)
 
-    stream_url, stream_type, subtitles, servers = extract_stream(imdb_id, media_type, season, episode)
-    
-    # Merge with reliable Stremio subtitles
-    stremio_subs = fetch_stremio_subs(media_type, imdb_id, season, episode)
-    subtitles = stremio_subs + subtitles
-    
-    if stream_url:
-        return jsonify({
-            'success': True,
-            'stream_url': stream_url,
-            'stream_type': stream_type,
-            'subtitles': subtitles,
-            'server_count': len(servers),
-            'servers': servers
-        })
-    else:
+        stream_url, stream_type, subtitles, servers = extract_stream(imdb_id, media_type, season, episode)
+        
+        # Merge with reliable Stremio subtitles
+        stremio_subs = fetch_stremio_subs(media_type, imdb_id, season, episode)
+        subtitles = stremio_subs + subtitles
+        
+        if stream_url:
+            return jsonify({
+                'success': True,
+                'stream_url': stream_url,
+                'stream_type': stream_type,
+                'subtitles': subtitles,
+                'server_count': len(servers),
+                'servers': servers
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Could not extract direct stream link from backend',
+                'server_count': len(servers),
+            })
+    except Exception as e:
+        import traceback
         return jsonify({
             'success': False,
-            'error': 'Could not extract direct stream link from backend',
-            'server_count': len(servers),
-        })
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/api/play_server/<ref>')
 def play_server(ref):
