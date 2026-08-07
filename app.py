@@ -84,14 +84,14 @@ def fetch_provider_servers(provider, imdb_id, media_type, season, episode):
         else:
             embed_url = f'{provider}/embed/tv/{imdb_id}/{season}/{episode}'
             
-        html = session.get(embed_url, timeout=2).text
+        html = session.get(embed_url, timeout=7).text
         match = re.search(r'var Q = (\{.*?\});', html)
         if not match: return []
         
         q_data = json.loads(match.group(1))
         qs = f"type={q_data['type']}&id={q_data['id']}&s={q_data['s']}&e={q_data['e']}&t={q_data['t']}"
         sources_url = f'{provider}/api.php?a=sources&{qs}'
-        sources_resp = session.get(sources_url, headers={'Referer': embed_url}, timeout=2).json()
+        sources_resp = session.get(sources_url, headers={'Referer': embed_url}, timeout=7).json()
         
         if sources_resp.get('status') == 'ok':
             servers = sources_resp.get('servers', [])
@@ -124,7 +124,7 @@ def extract_stream(imdb_id, media_type='movie', season=1, episode=1):
             unique_servers.append(s)
             
     if not unique_servers:
-        return None, None, []
+        return None, None, [], []
         
     session = requests.Session()
     session.headers.update({
@@ -144,7 +144,7 @@ def extract_stream(imdb_id, media_type='movie', season=1, episode=1):
             ref = server['ref']
             provider = server.get('provider', PROVIDERS[0])
             play_url = f'{provider}/api.php?a=play&ref={ref}'
-            play_resp = session.get(play_url, headers={'Referer': f'{provider}/'}, timeout=3).json()
+            play_resp = session.get(play_url, headers={'Referer': f'{provider}/'}, timeout=10).json()
 
             if play_resp.get('url'):
                 url = play_resp['url']
