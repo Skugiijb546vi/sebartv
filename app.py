@@ -160,7 +160,9 @@ def extract_stream(imdb_id, media_type='movie', season=1, episode=1):
             debug_log.append(f"play_server {provider} error: {str(e)}")
             continue
             
-    return None, None, [], unique_servers, debug_log
+    # Fallback to direct iframe if all servers fail (usually due to Cloudflare blocking Render IPs)
+    fallback_url = f'https://vidsrc.me/embed/movie/{imdb_id}' if media_type == 'movie' else f'https://vidsrc.me/embed/tv/{imdb_id}/{season}/{episode}'
+    return fallback_url, 'iframe', [], unique_servers, debug_log
 
 @app.route('/')
 def index():
